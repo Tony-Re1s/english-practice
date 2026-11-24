@@ -158,14 +158,14 @@ THEMES = {
     "london": {
         "bg": "app/static/theme/lon_bg.webp", "bg_wide": "app/static/theme/lon_bg_wide.webp",
         "font": "Cormorant+Garamond:wght@600;700", "title_font": "'Cormorant Garamond', Georgia, serif",
-        "panel": "rgba(13,20,36,.80)", "edge": "rgba(201,168,92,.55)", "text": "#F4ECDC", "muted": "#CBBFA6",
+        "panel": "rgba(13,20,36,.60)", "edge": "rgba(201,168,92,.55)", "text": "#F4ECDC", "muted": "#CBBFA6",
         "accent": "#C9A85C", "accent2": "#E6CD8E", "accent_ink": "#1B1408",
         "overlay": "linear-gradient(180deg, rgba(10,14,26,.10) 0%, rgba(10,14,26,.35) 45%, rgba(10,14,26,.70) 100%)",
     },
     "space": {
         "bg": "app/static/theme/space_bg.webp", "bg_wide": "app/static/theme/space_bg_wide.webp",
         "font": "Exo+2:wght@600;800", "title_font": "'Exo 2', 'Nunito', sans-serif",
-        "panel": "rgba(10,12,38,.62)", "edge": "rgba(126,232,255,.35)", "text": "#EAF2FF", "muted": "#AFC0E8",
+        "panel": "rgba(10,12,38,.48)", "edge": "rgba(126,232,255,.35)", "text": "#EAF2FF", "muted": "#AFC0E8",
         "accent": "#38D6F5", "accent2": "#A78BFA", "accent_ink": "#061021",
         "overlay": "radial-gradient(120% 80% at 50% 0%, rgba(0,0,0,0) 0%, rgba(4,6,20,.35) 70%)",
     },
@@ -188,7 +188,7 @@ def theme_css(name: str) -> str:
 @media (prefers-reduced-motion: reduce) {{ .stApp::before {{ animation:none; translate:none; }} }}
 [data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stBottom"] > div,
 [data-testid="stBottomBlockContainer"] {{ background:transparent !important; position:relative; z-index:1; }}
-.block-container {{ background:{t['panel']}; backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2);
+.block-container {{ background:{t['panel']}; backdrop-filter: blur(10px) saturate(1.2); -webkit-backdrop-filter: blur(10px) saturate(1.2);
   border:1px solid {t['edge']}; border-radius:26px; margin-top:12px; margin-bottom:12px;
   padding:1.3rem 1.3rem 2rem !important; box-shadow:0 20px 60px rgba(0,0,0,.45); animation: ep-in .45s ease-out; }}
 @keyframes ep-in {{ from {{ opacity:0; transform: translateY(10px) scale(.985) }} to {{ opacity:1; transform:none }} }}
@@ -202,16 +202,16 @@ def theme_css(name: str) -> str:
 .brand span {{ color:{t['text']} !important; font-family:{t['title_font']} !important; font-size:1.3rem !important; }}
 .pill {{ background:rgba(255,255,255,.08) !important; color:{t['accent2']} !important; border-color:{t['edge']} !important; }}
 /* botões, pílulas e abas */
-.stButton > button[kind="secondary"], [data-testid="stPills"] button, [data-testid="stButtonGroup"] button {{
+.stButton > button[kind="secondary"], button[data-variant] {{
   background:rgba(255,255,255,.07) !important; color:{t['text']} !important; border:1px solid {t['edge']} !important;
   transition: transform .15s ease, background .2s ease; }}
-.stButton > button[kind="secondary"] p, [data-testid="stPills"] button p, [data-testid="stButtonGroup"] button p {{ color:{t['text']} !important; }}
-.stButton > button:active, [data-testid="stPills"] button:active {{ transform:scale(.96); }}
-[data-testid="stPills"] button[kind*="Active"], [data-testid="stButtonGroup"] button[kind*="Active"],
+.stButton > button[kind="secondary"] p, button[data-variant] p {{ color:{t['text']} !important; }}
+.stButton > button:active, button[data-variant]:active {{ transform:scale(.96); }}
+button[data-variant][aria-checked="true"], button[data-variant][data-selected="true"],
 .stButton > button[kind="primary"], [data-testid="stFormSubmitButton"] button {{
   background:linear-gradient(135deg, {t['accent2']}, {t['accent']}) !important; color:{t['accent_ink']} !important;
   border:none !important; box-shadow:0 6px 20px rgba(0,0,0,.35); }}
-[data-testid="stPills"] button[kind*="Active"] p, [data-testid="stButtonGroup"] button[kind*="Active"] p,
+button[data-variant][aria-checked="true"] p, button[data-variant][data-selected="true"] p,
 .stButton > button[kind="primary"] p, [data-testid="stFormSubmitButton"] button p {{ color:{t['accent_ink']} !important; }}
 [data-testid="stTab"] p {{ color:{t['muted']} !important; }}
 [data-testid="stTab"][aria-selected="true"] p {{ color:{t['accent2']} !important; }}

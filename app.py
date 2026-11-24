@@ -465,7 +465,7 @@ def learn_level() -> str:
                         format_func=lambda k: LEVELS[k]["label"], key="learn_level")
 
 
-def kids_galaxy(done: dict) -> int:
+def kids_galaxy(done: dict) -> int | None:
     """Nível Criança: a trilha vira uma viagem pela galáxia. Retorna o nº do exercício escolhido."""
     if "astro" not in ss:
         ss.astro = (db.get_pref(email, "astronauta") if db.enabled() else None) or ""
@@ -481,7 +481,7 @@ def kids_galaxy(done: dict) -> int:
                 if db.enabled():
                     db.set_pref(email, "astronauta", ss.astro)
                 st.rerun()
-        st.stop()
+        return None  # (sem st.stop, para a barra de baixo continuar aparecendo)
 
     ok = {n for n, (sc, tt) in done.items() if galaxy.passed(sc, tt)}
     nxt = 1
@@ -531,6 +531,8 @@ def grammar_tab(lvl: str) -> None:
     kids = LEVELS[lvl].get("kids", False)
     if kids:
         num = kids_galaxy(done)
+        if num is None:
+            return
     else:
         st.session_state.setdefault("ex_blocks", 5)  # 5 blocos de 10 = 50 exercícios visíveis; dá para ir aumentando
         n_total = ss.ex_blocks * 10

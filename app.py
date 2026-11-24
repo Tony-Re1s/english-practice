@@ -76,15 +76,21 @@ if "theme_pref" not in ss:
 
 
 def current_theme() -> str:
-    """Nível Criança → Espaço; os outros níveis → o tema escolhido em Ajustes (Londres ou Clássico)."""
-    lvl = ss.get("level_pick") or ss.level
+    """Nível Criança → Espaço; os outros níveis → o tema escolhido em Ajustes (Londres ou Clássico).
+    Existe um nível só (ss.level), que vale para o app inteiro — Falar, Aprender e todas as telas."""
     if ss.view == "aprender" and ss.get("kid_inside") and LEVELS.get(ss.get("kid_lvl", ""), {}).get("kids"):
         return "space"
-    if ss.view == "aprender" and not prof.level_locked and ss.get("learn_level"):
-        lvl = ss.learn_level
-    if LEVELS.get(lvl, {}).get("kids"):
+    if LEVELS.get(ss.level, {}).get("kids"):
         return "space"
     return ss.theme_pref
+
+
+def _set_level(widget_key: str) -> None:
+    """Callback dos seletores de nível: muda o nível do app inteiro (roda antes da tela ser desenhada)."""
+    v = ss.get(widget_key)
+    if v:
+        ss.level = v
+        ss.kid_inside = None
 
 
 ui.apply_theme(current_theme())
@@ -387,6 +393,10 @@ def settings_view() -> None:
     ss.slow_voice = st.toggle("🐢 Voz devagar", value=ss.slow_voice, help="A parceira fala mais devagar sempre.")
     ss.show_text = st.toggle("👀 Mostrar texto das respostas", value=ss.show_text,
                              help="Desligue para treinar a escuta: o texto fica escondido até você abrir.")
+    if not prof.level_locked:
+        ss.set_level = ss.level
+        st.selectbox("Nível", list(LEVELS), format_func=lambda k: LEVELS[k]["label"], key="set_level",
+                     on_change=_set_level, args=("set_level",))
     themes = {"london": "🇬🇧 Londres (imersivo)", "classic": "🤍 Clássico (claro)"}
     pick = st.segmented_control("Visual do app", list(themes), format_func=lambda k: themes[k],
                                 default=ss.theme_pref if ss.theme_pref in themes else "london", key="theme_pick")
@@ -504,8 +514,10 @@ def learn_level() -> str:
     if prof.level_locked:
         st.caption(f"Nível: {LEVELS[ss.level]['label']}")
         return ss.level
-    return st.selectbox("Nível da trilha", list(LEVELS), index=list(LEVELS).index(ss.level),
-                        format_func=lambda k: LEVELS[k]["label"], key="learn_level")
+    ss.learn_level = ss.level   # sempre igual ao nível do app
+    st.selectbox("Nível", list(LEVELS), format_func=lambda k: LEVELS[k]["label"], key="learn_level",
+                 on_change=_set_level, args=("learn_level",))
+    return ss.level
 
 
 def kids_astro() -> tuple[str, str]:
@@ -1040,8 +1052,9 @@ if not ss.started:
     if prof.level_locked:
         st.markdown(f"**Nível:** {LEVELS[ss.level]['label']}")
     else:
-        ss.level = st.pills("Nível", list(LEVELS), format_func=lambda k: LEVELS[k]["label"],
-                            default=ss.level, selection_mode="single", key="level_pick") or ss.level
+        ss.level_pick = ss.level    # sempre igual ao nível do app
+        st.pills("Nível", list(LEVELS), format_func=lambda k: LEVELS[k]["label"], selection_mode="single",
+                 key="level_pick", on_change=_set_level, args=("level_pick",))
 
     live_ok, live_why, live_used = live_status()
     modes = {"maos": "🎧 Mãos livres", "apertar": "👆 Apertar para falar"}

@@ -76,11 +76,12 @@ def _conn():
     h = _holder()
     if h["conn"] is None or h["conn"].closed:
         h["conn"] = psycopg.connect(_url(), autocommit=True, connect_timeout=8)
-        if not h["schema"]:
+        version = hash(tuple(SCHEMA))  # muda quando o código ganha tabelas novas → cria na hora
+        if h["schema"] != version:
             with h["conn"].cursor() as cur:
                 for sql in SCHEMA:
                     cur.execute(sql)
-            h["schema"] = True
+            h["schema"] = version
     return h["conn"]
 
 

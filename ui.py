@@ -83,10 +83,10 @@ def pill(text: str) -> None:
     st.markdown(f'<span class="pill">{_fmt(text)}</span>', unsafe_allow_html=True)
 
 
-def ai_bubble(text: str, hidden: bool = False) -> None:
+def ai_bubble(text: str, hidden: bool = False, avatar: str = "🧑‍🏫") -> None:
     body = "🔊 Texto escondido — ouça e tente entender" if hidden else _fmt(text)
     cls = "bubble hidden" if hidden else "bubble"
-    st.markdown(f'<div class="msg ai"><div class="avatar">🧑‍🏫</div><div class="{cls}">{body}</div></div>',
+    st.markdown(f'<div class="msg ai"><div class="avatar">{avatar}</div><div class="{cls}">{body}</div></div>',
                 unsafe_allow_html=True)
 
 

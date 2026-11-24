@@ -6,15 +6,42 @@ Os exercícios são criados pelo Claude na primeira vez que alguém abre e ficam
 """
 
 SYLLABUS = {
+    # Criança (7-8 anos): progressão do Cambridge Young Learners (Pre A1 Starters).
+    # 10 por galáxia: 9 temas novos + 1 revisão no "chefão" (Sol / buraco negro / Andrômeda).
     "crianca": [
-        "Colors (red, blue, green, yellow)", "Numbers 1-10", "Animals (cat, dog, bird, fish)", "Family words (mom, dad, brother, sister)",
-        "I am / You are", "My name is ...", "Fruits (apple, banana, orange)", "Toys (ball, doll, car, kite)",
-        "This is / That is", "Big and small", "Body parts (head, eyes, hands)", "Clothes (shirt, shoes, hat)",
-        "I like / I don't like", "Food (pizza, rice, bread, milk)", "Numbers 11-20", "Shapes (circle, square, triangle)",
-        "School things (pen, book, bag)", "Can / can't (I can swim)", "Days of the week", "Weather (sunny, rainy, cold)",
-        "Feelings (happy, sad, tired)", "Places at home (kitchen, bedroom)", "In / on / under", "Have got (I have got a dog)",
-        "Actions (run, jump, sing, dance)", "Plurals (one cat, two cats)", "Opposites (hot/cold, up/down)", "Farm animals and sounds",
-        "Sports (soccer, swimming)", "Questions: What is it?",
+        # Galáxia 1 — eu e a sala de aula
+        "Hello! / Goodbye! (greetings)",
+        "My name is ... / What's your name?",
+        "Numbers 1-10 and How old are you? (I'm 7)",
+        "Colors (red, blue, green, yellow, ...)",
+        "Classroom things (pen, pencil, book, bag)",
+        "This is / That is + a / an",
+        "Family (mom, dad, brother, sister, grandma)",
+        "Animals and pets (cat, dog, bird, fish)",
+        "I like / I don't like",
+        "Review: greetings, name, age, colors, family, animals",
+        # Galáxia 2 — meu mundo
+        "Toys (ball, doll, car, kite, robot)",
+        "Fruits and food (apple, banana, pizza, milk)",
+        "Body parts (head, eyes, nose, hands)",
+        "Clothes (shirt, shoes, hat, dress)",
+        "I have got / Have you got ...?",
+        "Plurals (one cat, two cats)",
+        "Numbers 11-20 and How many ...?",
+        "Big / small / long / short (describing things)",
+        "Where is it? In / on / under",
+        "Review: toys, food, body, clothes, have got, in/on/under",
+        # Galáxia 3 — minha rotina e o que eu sei fazer
+        "My house (kitchen, bedroom, bathroom, garden)",
+        "Actions (run, jump, swim, sing, dance)",
+        "I can / I can't (I can swim)",
+        "Days of the week",
+        "My day (get up, go to school, play, sleep)",
+        "Weather (sunny, rainy, windy, cold)",
+        "Feelings (happy, sad, tired, hungry)",
+        "Questions: What / Who / Where",
+        "Sports and games (soccer, swimming, hide and seek)",
+        "Review: house, actions, can, days, my day, weather, feelings",
     ],
     "iniciante": [
         "Verb to be: I am, you are, he is", "Verb to be: negative and questions", "Subject pronouns", "Possessive adjectives (my, your, his, her)",

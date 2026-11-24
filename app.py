@@ -1143,7 +1143,7 @@ last_ai = max((i for i, t in enumerate(ss.turns) if t["role"] == "assistant"), d
 for i, t in enumerate(ss.turns):
     if t["role"] == "assistant":
         hide = not ss.show_text and i == last_ai and not ss.summary
-        ui.ai_bubble(t["text"], hidden=hide)
+        ui.ai_bubble(t["text"], hidden=hide, avatar="🤖" if LEVELS[ss.level].get("kids") else "🧑‍🏫")
         if i == last_ai:
             if hide:
                 with st.expander("👀 Ver texto"):

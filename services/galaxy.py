@@ -178,7 +178,10 @@ TRAIL_CSS = """
 .kp-card { animation: kp-in .5s cubic-bezier(.2,.8,.2,1); background:rgba(8,10,32,.55); border:1px solid rgba(126,232,255,.35);
   border-radius:22px; padding:16px 18px; margin-bottom:12px; backdrop-filter: blur(8px); }
 @keyframes kp-in { from { opacity:0; transform: translateY(30px) scale(.92) } to { opacity:1; transform:none } }
-.kp-q { font-size:1.45rem; font-weight:800; line-height:1.35; color:#fff; }
+.kp-q { font-size:1.45rem; font-weight:800; line-height:1.35; color:#fff; margin-top:6px; }
+.kp-ins { font-size:1.15rem; font-weight:800; line-height:1.35; color:#FFE27A; margin-top:4px; }
+[class*="st-key-kp_opt_"] button { min-height:64px; font-size:1.25rem !important; }
+[class*="st-key-kp_opt_"] button p { font-size:1.25rem !important; }
 .kp-head { display:flex; align-items:center; gap:12px; margin:4px 0 6px; }
 .kp-head img { width:64px; height:64px; animation: kp-spin 30s linear infinite; filter: drop-shadow(0 0 14px rgba(140,200,255,.5)); }
 @keyframes kp-spin { to { transform: rotate(360deg) } }

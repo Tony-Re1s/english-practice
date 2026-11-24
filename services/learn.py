@@ -103,6 +103,62 @@ def make_exercise(level_guide: str, cefr: str, topic: str, rnd: int, api_key: st
     return data, usage
 
 
+KIDS_EXERCISE_TOOL = {
+    "name": "kids_exercise",
+    "description": "A short English mission for a Brazilian child aged 7-8 who is starting English.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "title": {"type": "string", "description": "Fun short title in Portuguese, with the English words in parentheses."},
+            "explanation_pt": {"type": "string", "description": "2-4 very short, friendly sentences in Brazilian Portuguese a 7-year-old understands."},
+            "examples": {"type": "array", "items": {"type": "string"}, "description": "3 very short English sentences (2-6 words)."},
+            "questions": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "type": {"type": "string", "enum": ["mc", "fill"]},
+                        "instruction_pt": {"type": "string", "description": "What to do, in simple Portuguese (e.g. 'Toque na palavra que significa vermelho')."},
+                        "instruction_en": {"type": "string", "description": "The same instruction in VERY simple English (e.g. 'Tap the red one!')."},
+                        "say": {"type": "string", "description": "Short English text the robot reads aloud for this question (the word or sentence to hear)."},
+                        "prompt": {"type": "string", "description": "Short English text shown on screen (a word or a 2-6 word sentence). For 'fill' use ___ for the gap. Can be empty if the instruction is enough."},
+                        "options": {"type": "array", "items": {"type": "string"}, "description": "For 'mc': 3 short options (one or two words each), in English unless the instruction asks for Portuguese."},
+                        "emojis": {"type": "array", "items": {"type": "string"}, "description": "For 'mc': one emoji per option, same order, that shows its meaning (e.g. 🍎 for apple). Use '' if none fits."},
+                        "answer": {"type": "string", "description": "Correct option text (mc) or the 1-2 words for the gap (fill)."},
+                        "accept": {"type": "array", "items": {"type": "string"}, "description": "Other accepted answers (fill)."},
+                        "hint_pt": {"type": "string", "description": "Portuguese translation/hint of the English on screen, WITHOUT giving the answer away."},
+                        "explain_pt": {"type": "string", "description": "One short, encouraging sentence in Portuguese explaining the answer."},
+                    },
+                    "required": ["type", "instruction_pt", "instruction_en", "say", "answer", "hint_pt", "explain_pt"],
+                },
+                "description": "Exactly 6 questions: at least 4 'mc'; at most 2 'fill', whose answer is 1-2 words the child just saw.",
+            },
+        },
+        "required": ["title", "explanation_pt", "examples", "questions"],
+    },
+}
+
+
+def make_kids_exercise(level_guide: str, topic: str, rnd: int, api_key: str | None) -> tuple[dict, dict]:
+    system = ("You are a warm primary-school English teacher creating original missions for Brazilian children aged 7-8 "
+              "who are beginning English (Cambridge Pre A1 Starters). Listening comes before reading: every question "
+              "has text for the robot to read aloud. Use only very common, concrete words and tiny sentences. "
+              "Follow the Cambridge Starters task styles: 'Listen and choose' (the robot says a word, the child picks it), "
+              "'Look and read: yes or no' (options 'yes'/'no' about an emoji or a tiny sentence), 'Read and choose the "
+              "missing word' and 'Look and write the word' (fill, 1-2 letters/words already seen). Recycle words from "
+              "the topic several times (repetition helps children remember). "
+              f"Level guidance: {level_guide}")
+    user = (f"Topic: {topic}.\n"
+            + (f"This is review round {rnd}: use new words and situations.\n" if rnd > 1 else "")
+            + "Create the mission with exactly 6 questions. Each question must have exactly ONE correct answer, and "
+              "every wrong option must be clearly wrong. Prefer 'mc' with emojis that show the meaning. 'fill' answers "
+              "must be one or two easy words already shown in the examples. Check each question yourself.")
+    data, usage = _tool_call(system, user, KIDS_EXERCISE_TOOL, api_key, max_tokens=2200)
+    data["questions"] = [q for q in data.get("questions", []) if q.get("answer")][:8]
+    data["kids"] = True
+    return data, usage
+
+
 def _norm(s: str) -> str:
     s = unicodedata.normalize("NFKC", str(s or "")).strip().lower()
     s = s.replace("’", "'").replace("‘", "'")

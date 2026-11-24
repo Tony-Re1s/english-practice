@@ -589,9 +589,15 @@ def kids_galaxy(lvl: str, done: dict) -> None:
 
 
 def _say(text: str) -> None:
-    """O robô lê em inglês (voz devagar, grátis)."""
+    """O robô lê em inglês (voz devagar, grátis). Guarda o áudio para não gerar de novo."""
+    text = (text or "").replace("___", "…").strip()
+    if not text:
+        return
     try:
-        audio, mime, _ = voice.speak(text.replace("___", "…"), pace="slow", log=log)
+        cache = ss.setdefault("tts_cache", {})
+        if text not in cache:
+            cache[text] = voice.speak(text, pace="slow", log=log)[:2]
+        audio, mime = cache[text]
         st.audio(audio, format=mime, autoplay=True)
     except Exception as e:
         st.caption(f"Não consegui falar agora: {e}")
@@ -619,7 +625,7 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
         with st.spinner(f"🚀 Pousando em {info['en']}..."):
             try:
                 lv = LEVELS[lvl]
-                ex, u = learn.make_exercise(lv["guide"], lv["cefr"], topic, rnd, prof.keys.get("anthropic"))
+                ex, u = learn.make_kids_exercise(lv["guide"], topic, rnd, prof.keys.get("anthropic"))
                 log(step="exercício", provider="Anthropic", model=u["model"], ok=True,
                     input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
                 db.save_exercise(lvl, num, topic, ex)
@@ -679,10 +685,29 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
 
     q = qs[i - 1]
     prompt = q.get("prompt", "")
+    g = ((num - 1) // 10) % 3          # galáxia 1: instrução em português; 2: inglês + português; 3: inglês
+    ins_pt, ins_en = q.get("instruction_pt", ""), q.get("instruction_en", "")
+    if q["type"] == "order":
+        ins_pt, ins_en = "Toque nas palavras na ordem certa para montar a frase.", "Make the sentence!"
+    if g == 0 or not ins_en:
+        ins_html = html_escape(ins_pt)
+    elif g == 1:
+        ins_html = f'{html_escape(ins_en)}<div style="font-size:.95rem;color:#AFC0E8;font-weight:600">{html_escape(ins_pt)}</div>'
+    else:
+        ins_html = html_escape(ins_en)
+    shown = "" if q["type"] == "order" else prompt
     st.markdown(f'<div class="kp-card"><div style="color:#AFC0E8;font-weight:800">PARADA {i} DE {len(qs)}</div>'
-                f'<div class="kp-q">{html_escape(prompt)}</div></div>', unsafe_allow_html=True)
-    if q["type"] != "order" and st.button("🔊 Ouvir a frase", key=f"kp_say_{num}_{i}"):
-        _say(prompt)
+                f'<div class="kp-ins">{ins_html}</div>'
+                + (f'<div class="kp-q">{html_escape(shown)}</div>' if shown else "") + '</div>', unsafe_allow_html=True)
+    say = q.get("say") or (q["answer"] if q["type"] == "order" else prompt)
+    said = ss.setdefault("kp_said", set())
+    c1, c2 = st.columns(2)
+    replay = c1.button("🔊 Ouvir de novo", key=f"kp_say_{num}_{i}", width="stretch")
+    if (f"{key}:{i}" not in said or replay) and i not in stt["res"]:
+        said.add(f"{key}:{i}")
+        _say(say)       # ouvir vem antes de ler: o robô fala sozinho quando a parada abre
+    if q.get("hint_pt") and c2.button("🇧🇷 O que quer dizer?", key=f"kp_hint_{num}_{i}", width="stretch"):
+        st.info(q["hint_pt"], icon="💡")
 
     def answer(given: str) -> None:
         ok = learn.check_answer(q, given)
@@ -711,9 +736,11 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
         return
 
     if q["type"] == "mc" and q.get("options"):
+        emo = q.get("emojis") or []
         cols = st.columns(2)
         for j, opt in enumerate(q["options"]):
-            if cols[j % 2].button(opt, key=f"kp_opt_{num}_{i}_{j}", width="stretch"):
+            label = f"{emo[j]}  {opt}" if j < len(emo) and emo[j] else opt
+            if cols[j % 2].button(label, key=f"kp_opt_{num}_{i}_{j}", width="stretch"):
                 answer(opt)
     elif q["type"] == "order":
         import random

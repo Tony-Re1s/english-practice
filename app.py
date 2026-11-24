@@ -488,15 +488,17 @@ def grammar_tab(lvl: str) -> None:
     ex = cache.get(key) or ((db.get_exercise(lvl, num) or {}).get("content") if db.enabled() else None)
     if isinstance(ex, str):
         ex = json.loads(ex)
-    if not ex:
-        if st.button("✨ Abrir exercício", type="primary", key=f"open_{key}", width="stretch"):
+    redo = bool(ex) and prof.is_admin and st.button("🔁 Refazer exercício (admin)", key=f"redo_{key}",
+                                                     help="Gera uma nova versão deste número, para todos do nível.")
+    if not ex or redo:
+        if redo or st.button("✨ Abrir exercício", type="primary", key=f"open_{key}", width="stretch"):
             with st.spinner("Preparando o exercício (só na primeira vez)..."):
                 try:
                     lv = LEVELS[lvl]
                     ex, u = learn.make_exercise(lv["guide"], lv["cefr"], topic, rnd, prof.keys.get("anthropic"))
                     log(step="exercício", provider="Anthropic", model=u["model"], ok=True,
                         input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
-                    db.save_exercise(lvl, num, topic, ex)
+                    db.save_exercise(lvl, num, topic, ex, replace=redo)
                     cache[key] = ex
                     st.rerun()
                 except Exception as e:

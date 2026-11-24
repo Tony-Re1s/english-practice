@@ -95,7 +95,9 @@ def make_exercise(level_guide: str, cefr: str, topic: str, rnd: int, api_key: st
     user = (f"Grammar point: {topic}.\n"
             + (f"This is review round {rnd}: use completely new sentences and situations.\n" if rnd > 1 else "")
             + "Create the exercise with exactly 6 questions (mix 'mc' and 'fill'). For 'fill', the gap answer must be "
-              "short and unambiguous. Each question must have only one correct answer.")
+              "short and unambiguous. Each question must have exactly ONE correct answer: in 'mc', every wrong "
+              "option must contain a clear grammar error (never two acceptable options that differ only in extra "
+              "words). Before answering, check each question yourself.")
     data, usage = _tool_call(system, user, EXERCISE_TOOL, api_key)
     data["questions"] = [q for q in data.get("questions", []) if q.get("prompt") and q.get("answer")][:8]
     return data, usage

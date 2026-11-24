@@ -248,9 +248,10 @@ def get_exercise(level: str, num: int) -> dict | None:
     return rows[0] if rows else None
 
 
-def save_exercise(level: str, num: int, topic: str, content: dict) -> None:
+def save_exercise(level: str, num: int, topic: str, content: dict, replace: bool = False) -> None:
+    action = "update set topic = excluded.topic, content = excluded.content, created_at = now()" if replace else "nothing"
     _run("insert into ep_exercises (level, num, topic, content) values (%s,%s,%s,%s) "
-         "on conflict (level, num) do nothing", (level, num, topic, json.dumps(content, ensure_ascii=False)))
+         f"on conflict (level, num) do {action}", (level, num, topic, json.dumps(content, ensure_ascii=False)))
 
 
 def exercise_done(user_email: str, level: str, num: int, score: int, total: int, answers: dict) -> None:

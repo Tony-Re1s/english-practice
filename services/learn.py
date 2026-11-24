@@ -154,21 +154,34 @@ def _walk(o, out: list) -> None:
             _walk(v, out)
 
 
-def playlist_videos(url: str) -> list[dict]:
+def playlist_videos(url: str) -> tuple[list[dict], bool]:
     """Lista os vídeos de uma playlist pública do YouTube (até ~100), na ordem da playlist.
 
-    Lê a página da playlist; se o YouTube não entregar, usa o feed RSS (só os 15 mais recentes)."""
+    Lê a página da playlist; se o YouTube não entregar, usa o feed RSS (só os 15 primeiros).
+    Retorna (vídeos, completo) — completo=False quando veio pelo RSS e pode faltar vídeo."""
     pid = playlist_id(url)
     if not pid:
         raise ValueError("Não achei o código da playlist no link (precisa ter 'list=').")
     vids: list[dict] = []
-    try:
-        html = _fetch(f"https://www.youtube.com/playlist?list={pid}&hl=en")
-        m = re.search(r"ytInitialData\s*=\s*(\{.+?\});\s*</script>", html, re.S)
+    for page in (f"https://www.youtube.com/playlist?list={pid}&hl=en&ucbcb=1",
+                 f"https://m.youtube.com/playlist?list={pid}&hl=en&ucbcb=1"):
+        try:
+            html = _fetch(page)
+        except Exception:
+            continue
+        m = re.search(r"ytInitialData[\"']?\]?\s*=\s*(\{.+?\});\s*</script>", html, re.S)
         if m:
-            _walk(json.loads(m.group(1)), vids)
-    except Exception:
-        vids = []
+            try:
+                _walk(json.loads(m.group(1)), vids)
+            except Exception:
+                pass
+        if not vids:  # plano B na mesma página: procura os itens direto no texto
+            for vid, body in re.findall(r'"playlistVideoRenderer":\{"videoId":"([\w-]{11})"(.{0,1500}?)"index"', html, re.S):
+                t = re.search(r'"title":\{"runs":\[\{"text":"(.*?)"\}', body) or re.search(r'"simpleText":"(.*?)"', body)
+                vids.append({"youtube_id": vid, "title": json.loads(f'"{t.group(1)}"') if t else vid})
+        if vids:
+            break
+    complete = bool(vids)
     if not vids:
         import xml.etree.ElementTree as ET
         root = ET.fromstring(_fetch(f"https://www.youtube.com/feeds/videos.xml?playlist_id={pid}"))
@@ -180,7 +193,7 @@ def playlist_videos(url: str) -> list[dict]:
         if v["youtube_id"] and v["youtube_id"] not in seen and v["title"] not in ("[Private video]", "[Deleted video]"):
             seen.add(v["youtube_id"])
             uniq.append(v)
-    return uniq
+    return uniq, complete or len(uniq) < 15
 
 
 # Numeração do American English File (AEF) -> nossos níveis
@@ -188,7 +201,7 @@ AEF_LEVEL = {"starter": "iniciante", "1": "iniciante", "2": "basico", "3": "inte
 
 
 def level_from_title(title: str) -> str | None:
-    m = re.search(r"\b(?:AEF|American English File)\s*(starter|[1-5])", title or "", re.I)
+    m = re.search(r"\b(?:AEF|American English(?: File)?)\s*(starter|[1-5])", title or "", re.I)
     return AEF_LEVEL.get(m.group(1).lower()) if m else None
 
 

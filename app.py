@@ -643,7 +643,7 @@ def videos_tab(lvl: str) -> None:
                 if st.form_submit_button("Importar", width="stretch"):
                     try:
                         with st.spinner("Lendo a playlist..."):
-                            items = learn.playlist_videos(purl)
+                            items, complete = learn.playlist_videos(purl)
                         count: dict = {}
                         for i, it in enumerate(items, 1):
                             lv = (pauto and learn.level_from_title(it["title"])) or plev
@@ -652,6 +652,9 @@ def videos_tab(lvl: str) -> None:
                             count[lv] = count.get(lv, 0) + 1
                         st.success(f"{len(items)} vídeos importados: " +
                                    ", ".join(f"{LEVELS[k]['label']} {n}" for k, n in count.items()))
+                        if not complete:
+                            st.warning("O YouTube só deixou ler os 15 primeiros. Se a playlist tiver mais, "
+                                       "adicione o resto pelo \"Adicionar vídeo\" (os que já existem não duplicam).")
                     except Exception as e:
                         st.error(f"Não consegui ler a playlist: {e}")
     vids = db.list_videos(lvl)

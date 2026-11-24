@@ -623,7 +623,7 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
                    "explain_pt": "Essa é uma das frases de exemplo da missão."})
     n_stops = len(qs) + 1
     stt = ss.setdefault(f"kp_{key}", {"i": 0, "res": {}, "ans": {}, "done": False})
-    icons = {0: "📜"} | {j + 1: "🧩" if q["type"] == "order" else "⌨️" if q["type"] == "fill" else str(j + 1)
+    icons = {0: "📜"} | {j + 1: "🧩" if q["type"] == "order" else "✍️" if q["type"] == "fill" else str(j + 1)
                         for j, q in enumerate(qs)}
     st.markdown(galaxy.trail_html(n_stops, -1 if stt["done"] else stt["i"], stt["res"], icons),
                 unsafe_allow_html=True)

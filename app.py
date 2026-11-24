@@ -48,6 +48,7 @@ DEFAULTS = {
     "audio": None,        # (bytes, mime) da última fala da IA
     "autoplay": False,
     "summary": None,
+    "voice_used": "",
 }
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v if not isinstance(v, list) else list(v))
@@ -66,7 +67,9 @@ def api_messages() -> list[dict]:
 
 def set_audio(text: str, slow: bool = False) -> None:
     try:
-        ss.audio = voice.speak(text, slow=slow)
+        data, mime, provider = voice.speak(text, slow=slow)
+        ss.audio = (data, mime)
+        ss.voice_used = f"voz: {provider}"
         ss.autoplay = True
     except Exception as e:  # voz é opcional: a conversa segue sem ela
         ss.audio = None
@@ -150,8 +153,10 @@ with st.sidebar:
         st.rerun()
     if ss.started:
         st.caption(f"Falas suas: {user_turns} · Correções: {len(ss.corrections)}")
-    if not voice.has_openai():
-        st.info("Sem OPENAI_API_KEY: microfone desligado e voz básica (gTTS).", icon="🎙️")
+    if not voice.can_listen():
+        st.info("Sem chave de voz (GROQ, GEMINI ou OPENAI): microfone desligado, só texto.", icon="🎙️")
+    if ss.voice_used:
+        st.caption(ss.voice_used)
     if "auth" in st.secrets and st.user.get("is_logged_in", False):
         st.divider()
         st.caption(f"Conectado como {st.user.get('email', '')}")
@@ -224,12 +229,13 @@ if ss.summary:
     st.stop()
 
 # --- Entrada ------------------------------------------------------------------
-if voice.has_openai():
+if voice.can_listen():
     rec = st.audio_input("🎙️ Grave sua resposta", key=f"mic_{ss.mic_key}")
     if rec is not None:
         try:
             with st.spinner("Ouvindo..."):
-                heard = voice.transcribe(rec.getvalue())
+                heard, provider = voice.transcribe(rec.getvalue())
+            ss.voice_used = f"ouvido por: {provider}"
             if heard:
                 handle_user(heard)
                 st.rerun()

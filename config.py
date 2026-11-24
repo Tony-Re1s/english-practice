@@ -7,12 +7,20 @@ SUMMARY_MODEL = "claude-sonnet-5-5"    # usado só 1x por sessão, no resumo fin
 CHAT_MAX_TOKENS = 700
 SUMMARY_MAX_TOKENS = 1500
 
-# OpenAI faz a parte de voz (ouvir e falar).
-STT_MODEL = "whisper-1"                # transcrição da sua fala
-TTS_MODEL = "tts-1"                    # voz da parceira de conversa
-TTS_VOICE = "nova"                     # opções: alloy, echo, fable, onyx, nova, shimmer
-TTS_SPEED_NORMAL = 1.0
-TTS_SPEED_SLOW = 0.8                   # botão "ouvir devagar"
+# --- Voz (ordem de tentativa em services/voice.py: grátis primeiro) -----------
+# Ouvir sua fala
+GROQ_STT_MODEL = "whisper-large-v3-turbo"      # grátis (precisa GROQ_API_KEY)
+GEMINI_STT_MODEL = "gemini-3.8-flash"          # precisa GEMINI_API_KEY
+OPENAI_STT_MODEL = "gpt-4o-mini-transcribe"    # pago; a OpenAI desliga em 26/02/2027 → trocar por "gpt-transcribe"
+
+# Falar as respostas
+EDGE_VOICE = "en-US-AvaNeural"                 # grátis, sem chave (vozes neurais da Microsoft)
+EDGE_RATE_NORMAL = "+0%"
+EDGE_RATE_SLOW = "-20%"                        # botão "ouvir devagar"
+GEMINI_TTS_MODEL = "gemini-3.8-flash-lite-tts"
+GEMINI_VOICE = "Kore"
+OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
+OPENAI_TTS_VOICE = "nova"
 
 # --- Aluno -------------------------------------------------------------------
 LEARNER_LEVEL = "B1"

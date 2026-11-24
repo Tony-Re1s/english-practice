@@ -5,6 +5,7 @@ Parceira de conversação em inglês (nível B1) com voz, correções curtas a c
 ## O que tem
 - **4 cenários**: Dia a dia, Trabalho, Intercâmbio/viagem e Conversa livre (você escolhe o assunto). 15 situações prontas de role-play.
 - **Voz nos dois sentidos**: você grava a resposta, ela responde falando. Botão **🐢 Ouvir devagar**.
+- **Voz com reserva**: ouvir usa Groq → Gemini → OpenAI; falar usa Edge (grátis) → Gemini → OpenAI → gTTS. Só cai no pago se o grátis falhar.
 - **Treino de escuta**: desligue "Mostrar texto das respostas" e o texto só aparece se você abrir.
 - **✏️ Dica a cada fala**: versão mais natural da sua frase + explicação curta em português.
 - **🆘 Ideias de resposta**: duas frases simples para quando travar.
@@ -16,14 +17,16 @@ app.py               # interface Streamlit
 config.py            # modelos, voz, velocidade, nível — mude aqui
 prompts.py           # cenários, situações e prompts do tutor
 services/llm.py      # Claude (conversa, correções, resumo)
-services/voice.py    # OpenAI Whisper (ouvir) + TTS (falar); gTTS como reserva
+services/voice.py    # voz com fallback: grátis primeiro, OpenAI por último
 ```
 
 ## Chaves de API
 | Chave | Para quê | Obrigatória? |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Conversa e correções (console.anthropic.com) | Sim |
-| `OPENAI_API_KEY` | Microfone e voz natural (platform.openai.com) | Não: sem ela, só texto digitado + voz gTTS |
+| `GROQ_API_KEY` | Ouvir sua fala, grátis (console.groq.com) | Não |
+| `GEMINI_API_KEY` | Ouvir e falar, 2ª opção (aistudio.google.com) | Não |
+| `OPENAI_API_KEY` | Ouvir e falar, reserva paga (platform.openai.com) | Não |
 | `[auth]` + `ALLOWED_EMAILS` | Login com Google; só os e-mails da lista entram | Recomendado |
 
 As duas APIs cobram por uso. Configure um limite de gasto mensal em cada painel.
@@ -42,6 +45,6 @@ As duas APIs cobram por uso. Configure um limite de gasto mensal em cada painel.
 
 ## Ajustes rápidos (config.py)
 - Mais qualidade na conversa: `CHAT_MODEL = "claude-sonnet-5-5"`.
-- Outra voz: `TTS_VOICE` (alloy, echo, fable, onyx, nova, shimmer).
-- Velocidade do "ouvir devagar": `TTS_SPEED_SLOW`.
+- Outra voz grátis: `EDGE_VOICE` (ex.: en-US-AndrewNeural, en-GB-SoniaNeural).
+- Velocidade do "ouvir devagar": `EDGE_RATE_SLOW`.
 - Nova situação: adicione uma linha em `SCENARIOS` no `prompts.py`.

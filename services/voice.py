@@ -1,49 +1,182 @@
-"""Voz: transcrição (você → texto) e fala (texto → áudio).
+"""Voz com fallback: tenta o grátis primeiro e só cai no pago se o anterior falhar.
 
-Com OPENAI_API_KEY: Whisper para ouvir e TTS da OpenAI para falar.
-Sem a chave: o microfone fica desligado e a fala usa o gTTS (grátis, voz mais robótica).
+OUVIR (sua fala → texto):   Groq Whisper (grátis) → Gemini → OpenAI
+FALAR (texto → áudio):      Edge TTS (grátis) → Gemini → OpenAI → gTTS (grátis, robótica)
+
+Cada etapa só entra se a chave dela estiver nos Secrets (Edge e gTTS não usam chave).
 """
 
+import asyncio
 import io
+import wave
 
 import streamlit as st
 
-from config import STT_MODEL, TTS_MODEL, TTS_SPEED_NORMAL, TTS_SPEED_SLOW, TTS_VOICE
+from config import (
+    EDGE_RATE_NORMAL, EDGE_RATE_SLOW, EDGE_VOICE,
+    GEMINI_STT_MODEL, GEMINI_TTS_MODEL, GEMINI_VOICE,
+    GROQ_STT_MODEL,
+    OPENAI_STT_MODEL, OPENAI_TTS_MODEL, OPENAI_TTS_VOICE,
+)
+
+SLOW_INSTRUCTION = "Speak clearly and a bit slowly, like a patient English teacher."
+NORMAL_INSTRUCTION = "Speak naturally and clearly, in a friendly tone."
 
 
-def has_openai() -> bool:
-    return bool(st.secrets.get("OPENAI_API_KEY", ""))
+def _key(name: str) -> str:
+    return str(st.secrets.get(name, "") or "")
 
 
+def can_listen() -> bool:
+    return any(_key(k) for k in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"))
+
+
+# --- Clientes -----------------------------------------------------------------
 @st.cache_resource
 def _openai():
     from openai import OpenAI
+    return OpenAI(api_key=_key("OPENAI_API_KEY"))
 
-    return OpenAI(api_key=st.secrets["OPENAI_API_KEY"])
+
+@st.cache_resource
+def _groq():
+    from openai import OpenAI  # a Groq aceita o mesmo SDK
+    return OpenAI(api_key=_key("GROQ_API_KEY"), base_url="https://api.groq.com/openai/v1")
 
 
-def transcribe(audio_bytes: bytes) -> str:
-    result = _openai().audio.transcriptions.create(
-        model=STT_MODEL,
-        file=("speech.wav", audio_bytes),
-        language="en",
+@st.cache_resource
+def _gemini():
+    from google import genai
+    return genai.Client(api_key=_key("GEMINI_API_KEY"))
+
+
+# --- Ouvir ---------------------------------------------------------------------
+def _stt_groq(audio: bytes) -> str:
+    r = _groq().audio.transcriptions.create(
+        model=GROQ_STT_MODEL, file=("speech.wav", audio), language="en")
+    return r.text
+
+
+def _stt_gemini(audio: bytes) -> str:
+    from google.genai import types
+    r = _gemini().models.generate_content(
+        model=GEMINI_STT_MODEL,
+        contents=[
+            "Transcribe this English speech exactly as spoken. "
+            "Return only the transcript, without comments. Keep the speaker's mistakes.",
+            types.Part.from_bytes(data=audio, mime_type="audio/wav"),
+        ],
     )
-    return (result.text or "").strip()
+    return r.text or ""
 
 
-def speak(text: str, slow: bool = False) -> tuple[bytes, str]:
-    """Retorna (bytes_do_audio, mime)."""
-    if has_openai():
-        resp = _openai().audio.speech.create(
-            model=TTS_MODEL,
-            voice=TTS_VOICE,
-            input=text,
-            speed=TTS_SPEED_SLOW if slow else TTS_SPEED_NORMAL,
-        )
-        return resp.content, "audio/mp3"
+def _stt_openai(audio: bytes) -> str:
+    r = _openai().audio.transcriptions.create(
+        model=OPENAI_STT_MODEL, file=("speech.wav", audio), language="en")
+    return r.text
 
+
+STT_CHAIN = [
+    ("Groq", "GROQ_API_KEY", _stt_groq),
+    ("Gemini", "GEMINI_API_KEY", _stt_gemini),
+    ("OpenAI", "OPENAI_API_KEY", _stt_openai),
+]
+
+
+def transcribe(audio: bytes) -> tuple[str, str]:
+    """Retorna (texto, provedor_usado)."""
+    errors = []
+    for name, key, fn in STT_CHAIN:
+        if not _key(key):
+            continue
+        try:
+            text = (fn(audio) or "").strip()
+            if text:
+                return text, name
+            errors.append(f"{name}: vazio")
+        except Exception as e:
+            errors.append(f"{name}: {e}")
+    raise RuntimeError("Nenhum serviço conseguiu transcrever. " + " | ".join(errors))
+
+
+# --- Falar ---------------------------------------------------------------------
+def _tts_edge(text: str, slow: bool) -> tuple[bytes, str]:
+    import edge_tts
+
+    async def _run() -> bytes:
+        comm = edge_tts.Communicate(text, EDGE_VOICE, rate=EDGE_RATE_SLOW if slow else EDGE_RATE_NORMAL)
+        buf = bytearray()
+        async for chunk in comm.stream():
+            if chunk["type"] == "audio":
+                buf.extend(chunk["data"])
+        return bytes(buf)
+
+    data = asyncio.run(_run())
+    if not data:
+        raise RuntimeError("Edge TTS não devolveu áudio")
+    return data, "audio/mp3"
+
+
+def _pcm_to_wav(pcm: bytes, rate: int = 24000) -> bytes:
+    buf = io.BytesIO()
+    with wave.open(buf, "wb") as w:
+        w.setnchannels(1)
+        w.setsampwidth(2)
+        w.setframerate(rate)
+        w.writeframes(pcm)
+    return buf.getvalue()
+
+
+def _tts_gemini(text: str, slow: bool) -> tuple[bytes, str]:
+    style = "slow, clear and patient" if slow else "natural, friendly and clear"
+    r = _gemini().models.generate_content(
+        model=GEMINI_TTS_MODEL,
+        contents=[{"role": "user", "parts": [{"text": text, "speech_metadata": {"style": style}}]}],
+        config={
+            "response_modalities": ["AUDIO"],
+            "speech_config": {"voice_config": {"voice": GEMINI_VOICE}},
+        },
+    )
+    data = r.candidates[0].content.parts[0].inline_data.data
+    if not data.startswith(b"RIFF"):  # garante WAV tocável mesmo se vier PCM cru
+        data = _pcm_to_wav(data)
+    return data, "audio/wav"
+
+
+def _tts_openai(text: str, slow: bool) -> tuple[bytes, str]:
+    r = _openai().audio.speech.create(
+        model=OPENAI_TTS_MODEL, voice=OPENAI_TTS_VOICE, input=text,
+        instructions=SLOW_INSTRUCTION if slow else NORMAL_INSTRUCTION,
+        response_format="mp3",
+    )
+    return r.content, "audio/mp3"
+
+
+def _tts_gtts(text: str, slow: bool) -> tuple[bytes, str]:
     from gtts import gTTS
-
     buf = io.BytesIO()
     gTTS(text=text, lang="en", tld="us", slow=slow).write_to_fp(buf)
     return buf.getvalue(), "audio/mp3"
+
+
+TTS_CHAIN = [
+    ("Edge", None, _tts_edge),
+    ("Gemini", "GEMINI_API_KEY", _tts_gemini),
+    ("OpenAI", "OPENAI_API_KEY", _tts_openai),
+    ("gTTS", None, _tts_gtts),
+]
+
+
+def speak(text: str, slow: bool = False) -> tuple[bytes, str, str]:
+    """Retorna (bytes_do_audio, mime, provedor_usado)."""
+    errors = []
+    for name, key, fn in TTS_CHAIN:
+        if key and not _key(key):
+            continue
+        try:
+            data, mime = fn(text, slow)
+            if data:
+                return data, mime, name
+        except Exception as e:
+            errors.append(f"{name}: {e}")
+    raise RuntimeError("Nenhum serviço conseguiu gerar a voz. " + " | ".join(errors))

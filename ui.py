@@ -106,21 +106,40 @@ def brand() -> None:
 
 _HEAD_JS = """
 export default function () {
-  const head = document.head;
-  const add = (tag, attrs) => {
-    const sel = tag + Object.entries(attrs).filter(([k]) => k === 'rel' || k === 'name').map(([k, v]) => `[${k}="${v}"]`).join('');
-    if (head.querySelector(sel)) return;
-    const el = document.createElement(tag);
-    Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
-    head.appendChild(el);
-  };
-  add('link', { rel: 'apple-touch-icon', href: '/app/static/apple-touch-icon.png' });
-  add('link', { rel: 'manifest', href: '/app/static/manifest.json' });
-  add('meta', { name: 'apple-mobile-web-app-capable', content: 'yes' });
-  add('meta', { name: 'mobile-web-app-capable', content: 'yes' });
-  add('meta', { name: 'apple-mobile-web-app-title', content: 'English' });
-  add('meta', { name: 'apple-mobile-web-app-status-bar-style', content: 'default' });
-  add('meta', { name: 'theme-color', content: '#3FB8AF' });
+  // No Streamlit Cloud o app roda num iframe dentro da página do Streamlit (que tem o ícone da coroa).
+  // Ajustamos as duas: a nossa e a de fora (mesmo domínio), e vigiamos para o Streamlit não trocar de volta.
+  const L = window.location, k = L.pathname.indexOf('/~/+/');
+  const B = L.origin + (k >= 0 ? L.pathname.slice(0, k) + '/~/+/' : '/');
+  const I = B + 'app/static/apple-touch-icon.png', F = B + 'app/static/favicon.png', T = 'English';
+  function fix(d) {
+    const h = d.head; if (!h) return;
+    const link = (rel) => { let l = h.querySelector('link[rel="' + rel + '"]');
+      if (!l) { l = d.createElement('link'); l.rel = rel; h.appendChild(l); } return l; };
+    const meta = (n, v) => { let m = h.querySelector('meta[name="' + n + '"]');
+      if (!m) { m = d.createElement('meta'); m.name = n; h.appendChild(m); } if (m.content !== v) m.content = v; };
+    h.querySelectorAll('link[rel~="icon"]').forEach(l => { if (l.href !== F) { l.href = F; l.type = 'image/png'; } });
+    if (!h.querySelector('link[rel~="icon"]')) { const l = link('icon'); l.href = F; l.type = 'image/png'; }
+    h.querySelectorAll('link[rel="apple-touch-icon"],link[rel="apple-touch-icon-precomposed"]').forEach(l => {
+      if (l.href !== I) l.href = I; if (l.getAttribute('sizes') !== '180x180') l.setAttribute('sizes', '180x180'); });
+    if (!h.querySelector('link[rel="apple-touch-icon"]')) { const a = link('apple-touch-icon'); a.href = I; a.setAttribute('sizes', '180x180'); }
+    h.querySelectorAll('link[rel="manifest"],link[rel="mask-icon"]').forEach(l => l.remove());  // manifesto do Streamlit = coroa
+    meta('apple-mobile-web-app-title', T); meta('application-name', T); meta('theme-color', '#3FB8AF');
+    meta('apple-mobile-web-app-capable', 'yes'); meta('mobile-web-app-capable', 'yes');
+    meta('apple-mobile-web-app-status-bar-style', 'default');
+    if (!d.getElementById('ep-sem-selo')) { const s = d.createElement('style'); s.id = 'ep-sem-selo';
+      s.textContent = '[data-testid="manage-app-button"],[class*="viewerBadge"],[class*="_profileContainer"]{display:none!important}';
+      h.appendChild(s); }
+  }
+  const docs = [document];
+  try { if (window.parent && window.parent !== window && window.parent.document) docs.push(window.parent.document); } catch (e) {}
+  docs.forEach(d => {
+    try {
+      fix(d);
+      const W = d.defaultView;
+      if (!W.__epIcon) { W.__epIcon = new W.MutationObserver(() => { try { fix(d); } catch (e) {} });
+        W.__epIcon.observe(d.head, { subtree: true, childList: true, attributes: true }); }
+    } catch (e) {}
+  });
 }
 """
 _head = st.components.v2.component("english_head_tags", js=_HEAD_JS)

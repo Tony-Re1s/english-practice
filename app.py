@@ -12,7 +12,7 @@ from config import (DEFAULT_LEVEL, LEVELS, LIVE_MAX_SESSION_MIN, LIVE_MODEL, LIV
                     MAX_HISTORY_TURNS, PROVIDER_LABEL, PROVIDERS)
 from prompts import (FREE_TALK_OPEN, FREE_TALK_ROLE, LIVE_SYSTEM, SCENARIOS, START_MESSAGE, TOPIC_ROLE,
                      TUTOR_SYSTEM)
-from services import db, learn, live, llm, users, voice
+from services import galaxy, db, learn, live, llm, users, voice
 from syllabus import topic_for
 from services.voice_chat import voice_chat
 
@@ -465,24 +465,90 @@ def learn_level() -> str:
                         format_func=lambda k: LEVELS[k]["label"], key="learn_level")
 
 
+def kids_galaxy(done: dict) -> int:
+    """Nível Criança: a trilha vira uma viagem pela galáxia. Retorna o nº do exercício escolhido."""
+    if "astro" not in ss:
+        ss.astro = (db.get_pref(email, "astronauta") if db.enabled() else None) or ""
+    name, _, ship = ss.astro.partition("|")
+    ship = ship or "🚀"
+    if not name:
+        with st.form("astro_form"):
+            st.markdown("### 👩‍🚀 Vamos montar o seu astronauta!")
+            nm = st.text_input("Como se chama o astronauta?", max_chars=20)
+            sh = st.radio("Escolha a nave", ["🚀", "🛸", "🛰️"], horizontal=True)
+            if st.form_submit_button("Decolar! 🚀", type="primary", width="stretch") and nm.strip():
+                ss.astro = f"{nm.strip()}|{sh}"
+                if db.enabled():
+                    db.set_pref(email, "astronauta", ss.astro)
+                st.rerun()
+        st.stop()
+
+    ok = {n for n, (sc, tt) in done.items() if galaxy.passed(sc, tt)}
+    nxt = 1
+    while nxt in ok:
+        nxt += 1
+    n_blocks = max(3, (nxt - 1) // 10 + 2)
+    jump = ss.pop("kid_jump", None)
+    if jump:
+        n_blocks = max(n_blocks, (jump - 1) // 10 + 1)
+    names = [f"Galáxia {i + 1}" for i in range(n_blocks)]
+    if jump:
+        ss.kid_blk, ss.kid_sel = names[(jump - 1) // 10], jump
+    blk = st.segmented_control("Galáxia", names, default=names[(nxt - 1) // 10], key="kid_blk",
+                               label_visibility="collapsed") or names[(nxt - 1) // 10]
+    b = names.index(blk)
+    nums = list(range(b * 10 + 1, b * 10 + 11))
+    sel = ss.get("kid_sel")
+    if sel not in nums:
+        sel = nxt if nxt in nums else nums[0]
+    planets = [{"num": n, "done": n in done, "stars": galaxy.stars_for(*done[n]) if n in done else 0,
+                "locked": n > nxt and not prof.is_admin, "current": n == nxt, "selected": n == sel,
+                "boss": ("sun" if b % 2 == 0 else "moon") if n % 10 == 0 else None} for n in nums]
+    stars = sum(galaxy.stars_for(*v) for v in done.values())
+    if nxt in nums:
+        say, sub = f"Hi, {name}! Let's fly to planet {nxt}!", f"Oi, {name}! Vamos voar até o planeta {nxt}!"
+    elif nxt > nums[-1]:
+        say, sub = "Wow! You finished this galaxy! 🌟", "Uau! Você completou esta galáxia!"
+    else:
+        say, sub = "This galaxy is still far away… 🔭", f"Primeiro termine o planeta {nxt}."
+    pick = galaxy.galaxy_map(planets, say, sub, name=name, ship=ship, total_stars=stars,
+                             foot="Acerte pelo menos metade para liberar o próximo planeta ✨", key=f"gx_{b}")
+    if pick and pick != sel:
+        ss.kid_sel = pick
+        st.rerun()
+    ss.kid_sel = sel
+    with st.expander("👩‍🚀 Trocar nome ou nave"):
+        if st.button("Montar outro astronauta"):
+            ss.astro = ""
+            if db.enabled():
+                db.set_pref(email, "astronauta", "")
+            st.rerun()
+    return sel
+
+
 def grammar_tab(lvl: str) -> None:
     done = db.exercises_done_map(email, lvl) if db.enabled() else {}
-    st.session_state.setdefault("ex_blocks", 5)  # 5 blocos de 10 = 50 exercícios visíveis; dá para ir aumentando
-    n_total = ss.ex_blocks * 10
-    st.caption(f"Concluídos neste nível: **{len(done)}** de {n_total}. O exercício nº é sempre o mesmo para todo mundo "
-               "do mesmo nível — dá para combinar \"hoje do 1 ao 3\".")
-    blocks = [f"{i * 10 + 1}–{i * 10 + 10}" for i in range(ss.ex_blocks)]
-    blk = st.segmented_control("Bloco", blocks, default=blocks[0], key=f"blk_{lvl}") or blocks[0]
-    start = int(blk.split("–")[0])
-    nums = list(range(start, start + 10))
-    num = st.pills("Exercício", nums, default=nums[0], key=f"exn_{lvl}_{start}",
-                   format_func=lambda n: f"✅ {n}" if n in done else str(n)) or nums[0]
-    if st.button("➕ Mostrar mais 10 exercícios", key="more_ex"):
-        ss.ex_blocks += 1
-        st.rerun()
+    kids = LEVELS[lvl].get("kids", False)
+    if kids:
+        num = kids_galaxy(done)
+    else:
+        st.session_state.setdefault("ex_blocks", 5)  # 5 blocos de 10 = 50 exercícios visíveis; dá para ir aumentando
+        n_total = ss.ex_blocks * 10
+        st.caption(f"Concluídos neste nível: **{len(done)}** de {n_total}. O exercício nº é sempre o mesmo para todo mundo "
+                   "do mesmo nível — dá para combinar \"hoje do 1 ao 3\".")
+        blocks = [f"{i * 10 + 1}–{i * 10 + 10}" for i in range(ss.ex_blocks)]
+        blk = st.segmented_control("Bloco", blocks, default=blocks[0], key=f"blk_{lvl}") or blocks[0]
+        start = int(blk.split("–")[0])
+        nums = list(range(start, start + 10))
+        num = st.pills("Exercício", nums, default=nums[0], key=f"exn_{lvl}_{start}",
+                       format_func=lambda n: f"✅ {n}" if n in done else str(n)) or nums[0]
+        if st.button("➕ Mostrar mais 10 exercícios", key="more_ex"):
+            ss.ex_blocks += 1
+            st.rerun()
 
     topic, rnd = topic_for(lvl, num)
-    st.markdown(f"#### {num}. {topic}" + (f" · revisão {rnd}" if rnd > 1 else ""))
+    head = f"🪐 Planeta {num}" if kids else f"{num}."
+    st.markdown(f"#### {head} {topic}" + (f" · revisão {rnd}" if rnd > 1 else ""))
     cache = st.session_state.setdefault("ex_cache", {})
     key = f"{lvl}:{num}"
     ex = cache.get(key) or ((db.get_exercise(lvl, num) or {}).get("content") if db.enabled() else None)
@@ -505,7 +571,7 @@ def grammar_tab(lvl: str) -> None:
                     st.error(f"Não consegui criar o exercício: {e}")
         return
     cache[key] = ex
-    if num in done:
+    if num in done and not kids:
         sc, tt = done[num]
         st.success(f"Você já concluiu este exercício (melhor nota: {sc}/{tt}). Pode refazer quando quiser.", icon="✅")
     with st.container(border=True):
@@ -531,10 +597,21 @@ def grammar_tab(lvl: str) -> None:
                 st.markdown(f"✅ **{i + 1}.** Certo! {q.get('explain_pt', '')}")
             else:
                 st.markdown(f"❌ **{i + 1}.** Resposta: **{q['answer']}** — {q.get('explain_pt', '')}")
-        st.markdown(f"### Nota: {score}/{len(qs)}")
         db.exercise_done(email, lvl, num, score, len(qs), {str(k): v for k, v in answers.items()})
-        if score == len(qs):
-            st.balloons()
+        if kids:
+            n_st = galaxy.stars_for(score, len(qs))
+            if galaxy.passed(score, len(qs)):
+                galaxy.mascot(f"Great job! {'⭐' * n_st}", f"Muito bem! Você acertou {score} de {len(qs)} "
+                              "e liberou o próximo planeta!", party=True, key=f"party_{num}")
+                st.button("🚀 Voar para o próximo planeta", type="primary", width="stretch", key=f"next_{num}",
+                          on_click=lambda n=num + 1: ss.update(kid_jump=n))
+            else:
+                galaxy.mascot("Almost there! Try again! 💪", f"Quase! Você acertou {score} de {len(qs)}. "
+                              "Tente de novo para ganhar estrelas.", key=f"party_{num}")
+        else:
+            st.markdown(f"### Nota: {score}/{len(qs)}")
+            if score == len(qs):
+                st.balloons()
 
 
 def videos_tab(lvl: str) -> None:
@@ -555,12 +632,38 @@ def videos_tab(lvl: str) -> None:
                     else:
                         db.add_video(vlev, title or f"Vídeo {vid}", f"https://www.youtube.com/watch?v={vid}", vid, email)
                         st.success("Vídeo adicionado.")
+        with st.expander("📥 Importar uma playlist inteira"):
+            with st.form("import_pl"):
+                purl = st.text_input("Link da playlist do YouTube (tem 'list=' no endereço)")
+                pser = st.text_input("Nome da série", placeholder="ex.: American English File — Rob & Jenny")
+                pauto = st.toggle("Separar por nível pela numeração AEF (AEF 1 → Iniciante, 2 → Básico, "
+                                  "3 → Intermediário, 4-5 → Avançado)", value=True)
+                plev = st.selectbox("Nível dos vídeos sem numeração", list(LEVELS), index=list(LEVELS).index(lvl),
+                                    format_func=lambda k: LEVELS[k]["label"])
+                if st.form_submit_button("Importar", width="stretch"):
+                    try:
+                        with st.spinner("Lendo a playlist..."):
+                            items = learn.playlist_videos(purl)
+                        count: dict = {}
+                        for i, it in enumerate(items, 1):
+                            lv = (pauto and learn.level_from_title(it["title"])) or plev
+                            db.add_video(lv, it["title"], f"https://www.youtube.com/watch?v={it['youtube_id']}",
+                                         it["youtube_id"], email, position=i, series=pser.strip() or None)
+                            count[lv] = count.get(lv, 0) + 1
+                        st.success(f"{len(items)} vídeos importados: " +
+                                   ", ".join(f"{LEVELS[k]['label']} {n}" for k, n in count.items()))
+                    except Exception as e:
+                        st.error(f"Não consegui ler a playlist: {e}")
     vids = db.list_videos(lvl)
     if not vids:
         st.caption("Ainda não há vídeos neste nível." + (" Adicione pelo botão acima." if prof.is_admin else
                                                           " Peça ao administrador para adicionar."))
         return
     done = db.videos_done_map(email)
+    series = sorted({v.get("series") or "Avulsos" for v in vids})
+    if len(series) > 1:
+        pick = st.segmented_control("Série", series, default=series[0], key=f"vser_{lvl}") or series[0]
+        vids = [v for v in vids if (v.get("series") or "Avulsos") == pick]
     label = {v["id"]: f"{'✅ ' if v['id'] in done else ''}{i + 1}. {v['title']}" for i, v in enumerate(vids)}
     vid_id = st.selectbox("Vídeo", list(label), format_func=lambda k: label[k], key=f"vsel_{lvl}")
     v = next(x for x in vids if x["id"] == vid_id)

@@ -42,6 +42,10 @@ SCHEMA = [
     """create table if not exists ep_video_done (
         id bigserial primary key, user_email text, video_id bigint references ep_videos(id) on delete cascade,
         score int, total int, answers jsonb, ts timestamptz default now())""",
+    "alter table ep_videos add column if not exists position int",
+    "alter table ep_videos add column if not exists series text",
+    """create table if not exists ep_prefs (
+        user_email text, key text, value text, primary key (user_email, key))""",
 ]
 
 _lock = threading.Lock()
@@ -274,16 +278,19 @@ def exercise_history(user_email: str, limit: int = 100) -> list[dict]:
 
 
 # --- trilha de vídeos -------------------------------------------------------------------
-def add_video(level: str, title: str, url: str, youtube_id: str, added_by: str) -> None:
-    _run("""insert into ep_videos (level, title, url, youtube_id, added_by) values (%s,%s,%s,%s,%s)
-            on conflict (youtube_id) do update set level = excluded.level, title = excluded.title""",
-         (level, title, url, youtube_id, added_by))
+def add_video(level: str, title: str, url: str, youtube_id: str, added_by: str,
+              position: int | None = None, series: str | None = None) -> None:
+    _run("""insert into ep_videos (level, title, url, youtube_id, added_by, position, series)
+            values (%s,%s,%s,%s,%s,%s,%s)
+            on conflict (youtube_id) do update set level = excluded.level, title = excluded.title,
+              position = coalesce(excluded.position, ep_videos.position), series = coalesce(excluded.series, ep_videos.series)""",
+         (level, title, url, youtube_id, added_by, position, series))
 
 
 def list_videos(level: str | None = None) -> list[dict]:
     if level:
-        return _run("select * from ep_videos where level = %s order by id", (level,), fetch=True)
-    return _run("select * from ep_videos order by level, id", fetch=True)
+        return _run("select * from ep_videos where level = %s order by series nulls first, position nulls last, id", (level,), fetch=True)
+    return _run("select * from ep_videos order by level, series nulls first, position nulls last, id", fetch=True)
 
 
 def set_video_notes(video_id: int, notes: str, title: str | None = None) -> None:
@@ -310,3 +317,14 @@ def video_history(user_email: str, limit: int = 100) -> list[dict]:
                           v.title as video, d.score || '/' || d.total as nota
                    from ep_video_done d join ep_videos v on v.id = d.video_id
                    where d.user_email = %s order by d.ts desc limit %s""", (user_email, limit), fetch=True)
+
+
+# --- preferências por pessoa (ex.: nome do astronauta no modo infantil) ---------------
+def get_pref(user_email: str, key: str) -> str | None:
+    rows = _run("select value from ep_prefs where user_email = %s and key = %s", (user_email, key), fetch=True)
+    return rows[0]["value"] if rows else None
+
+
+def set_pref(user_email: str, key: str, value: str) -> None:
+    _run("""insert into ep_prefs (user_email, key, value) values (%s,%s,%s)
+            on conflict (user_email, key) do update set value = excluded.value""", (user_email, key, value))

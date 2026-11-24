@@ -123,6 +123,75 @@ def youtube_id(url: str) -> str | None:
     return m.group(1) if m else None
 
 
+def playlist_id(url: str) -> str | None:
+    m = re.search(r"[?&]list=([A-Za-z0-9_-]{10,})", url or "")
+    return m.group(1) if m else None
+
+
+def _fetch(url: str) -> str:
+    import urllib.request
+    req = urllib.request.Request(url, headers={
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) "
+                      "Version/17.0 Safari/605.1.15",
+        "Accept-Language": "en-US,en;q=0.9", "Cookie": "CONSENT=YES+1; SOCS=CAI"})
+    with urllib.request.urlopen(req, timeout=20) as r:
+        return r.read().decode("utf-8", "replace")
+
+
+def _walk(o, out: list) -> None:
+    """Procura os itens de playlist (playlistVideoRenderer) dentro do JSON da página."""
+    if isinstance(o, dict):
+        r = o.get("playlistVideoRenderer")
+        if isinstance(r, dict) and r.get("videoId"):
+            t = r.get("title", {})
+            title = t.get("simpleText") or "".join(x.get("text", "") for x in t.get("runs", []))
+            out.append({"youtube_id": r["videoId"], "title": title.strip()})
+            return
+        for v in o.values():
+            _walk(v, out)
+    elif isinstance(o, list):
+        for v in o:
+            _walk(v, out)
+
+
+def playlist_videos(url: str) -> list[dict]:
+    """Lista os vídeos de uma playlist pública do YouTube (até ~100), na ordem da playlist.
+
+    Lê a página da playlist; se o YouTube não entregar, usa o feed RSS (só os 15 mais recentes)."""
+    pid = playlist_id(url)
+    if not pid:
+        raise ValueError("Não achei o código da playlist no link (precisa ter 'list=').")
+    vids: list[dict] = []
+    try:
+        html = _fetch(f"https://www.youtube.com/playlist?list={pid}&hl=en")
+        m = re.search(r"ytInitialData\s*=\s*(\{.+?\});\s*</script>", html, re.S)
+        if m:
+            _walk(json.loads(m.group(1)), vids)
+    except Exception:
+        vids = []
+    if not vids:
+        import xml.etree.ElementTree as ET
+        root = ET.fromstring(_fetch(f"https://www.youtube.com/feeds/videos.xml?playlist_id={pid}"))
+        ns = {"a": "http://www.w3.org/2005/Atom", "yt": "http://www.youtube.com/xml/schemas/2015"}
+        for e in root.findall("a:entry", ns):
+            vids.append({"youtube_id": e.findtext("yt:videoId", "", ns), "title": e.findtext("a:title", "", ns)})
+    seen, uniq = set(), []
+    for v in vids:
+        if v["youtube_id"] and v["youtube_id"] not in seen and v["title"] not in ("[Private video]", "[Deleted video]"):
+            seen.add(v["youtube_id"])
+            uniq.append(v)
+    return uniq
+
+
+# Numeração do American English File (AEF) -> nossos níveis
+AEF_LEVEL = {"starter": "iniciante", "1": "iniciante", "2": "basico", "3": "intermediario", "4": "avancado", "5": "avancado"}
+
+
+def level_from_title(title: str) -> str | None:
+    m = re.search(r"\b(?:AEF|American English File)\s*(starter|[1-5])", title or "", re.I)
+    return AEF_LEVEL.get(m.group(1).lower()) if m else None
+
+
 def video_summary(url: str, gemini_key: str) -> tuple[str, dict]:
     """O Gemini assiste o vídeo uma vez (plano grátis) e devolve resumo + vocabulário em JSON."""
     from google import genai

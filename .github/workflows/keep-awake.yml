@@ -1,0 +1,30 @@
+name: Manter apps acordados
+
+on:
+  schedule:
+    - cron: "17 */6 * * *"   # a cada 6 horas (UTC), 4 vezes por dia
+  workflow_dispatch:          # botão "Run workflow" para rodar na hora
+
+jobs:
+  acordar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      # Apps a visitar (separe por vírgula). O crm-phd também precisa ser público, e já é.
+      APP_URLS: "https://tony-english-practice.streamlit.app/,https://crm-phd.streamlit.app/"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar navegador
+        run: |
+          pip install playwright psycopg[binary]
+          python -m playwright install --with-deps chromium
+      - name: Visitar e acordar os apps
+        run: python scripts/keep_awake.py
+      - name: Tocar o banco Neon (opcional)
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+        if: env.DATABASE_URL != ''
+        run: python -c "import os, psycopg; c = psycopg.connect(os.environ['DATABASE_URL'], connect_timeout=20); print('Neon:', c.execute('select now()').fetchone()[0]); c.close()"

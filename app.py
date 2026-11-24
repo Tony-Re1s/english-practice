@@ -63,6 +63,7 @@ st.session_state.setdefault("reply_seq", 0)
 st.session_state.setdefault("listen_token", 0)
 st.session_state.setdefault("level", DEFAULT_LEVEL)
 st.session_state.setdefault("view", "conversa")
+st.session_state.setdefault("slow_voice", False)   # "voz devagar" fica ligada até você desligar
 ss = st.session_state
 
 
@@ -102,7 +103,8 @@ def api_messages() -> list[dict]:
 
 def set_audio(text: str, pace: str | None = None) -> None:
     try:
-        data, mime, provider = voice.speak(text, pace=pace or LEVELS[ss.level]["pace"], log=log)
+        pace = pace or ("slow" if ss.slow_voice else LEVELS[ss.level]["pace"])
+        data, mime, provider = voice.speak(text, pace=pace, log=log)
         ss.audio = (data, mime)
         ss.voice_used = f"voz: {provider}"
         ss.autoplay = True
@@ -210,6 +212,8 @@ with st.sidebar:
         help="Contínua: o microfone ouve sozinho e para quando você termina de falar.",
     )
     continuous = can_listen and mode.startswith("🎧")
+    ss.slow_voice = st.toggle("🐢 Voz devagar", value=ss.slow_voice,
+                              help="A parceira fala mais devagar em toda a conversa.")
     show_text = st.toggle("Mostrar texto das respostas", value=True,
                           help="Desligue para treinar a escuta: o texto fica escondido até você abrir.")
     if not can_listen:
@@ -331,7 +335,7 @@ if not ss.started:
             "- 🎧 **Modo contínuo**: toque no microfone uma vez e converse. Ele para sozinho quando você termina de "
             "falar e volta a ouvir depois da resposta. Toque de novo para **pausar** e pensar.\n"
             "- ✏️ Quando algo puder soar mais natural, aparece uma **dica amarela** embaixo da sua fala.\n"
-            "- 🆘 Travou? Abra **Ideias de resposta**. 🐢 Não entendeu? **Ouvir devagar**.\n"
+            "- 🆘 Travou? Abra **Ideias de resposta**. 🐢 **Falar devagar** fica ligado até você desligar.\n"
             "- 🏁 Para terminar, toque em **Encerrar** ou simplesmente diga *\"let's stop here\"*. "
             "Você recebe o resumo com seus erros recorrentes.\n"
             "- 📊 Em **Uso e histórico** (barra lateral) você vê quais IAs foram usadas, o custo e as conversas antigas."
@@ -356,8 +360,12 @@ for i, t in enumerate(ss.turns):
                 st.audio(ss.audio[0], format=ss.audio[1], autoplay=ss.autoplay)
             if not ss.summary:
                 b1, b2 = st.columns(2)
-                if b1.button("🐢 Ouvir devagar", key=f"slow_{i}", width="stretch"):
-                    set_audio(t["text"], pace="slow")
+                slow_label = "🐢 Devagar: ligado" if ss.slow_voice else "🐢 Falar devagar"
+                if b1.button(slow_label, key=f"slow_{i}", width="stretch",
+                             type="primary" if ss.slow_voice else "secondary",
+                             help="Liga/desliga a voz devagar para o resto da conversa (e repete esta fala)."):
+                    ss.slow_voice = not ss.slow_voice
+                    set_audio(t["text"])
                     st.rerun()
                 if b2.button("🔁 Ouvir de novo", key=f"normal_{i}", width="stretch"):
                     set_audio(t["text"])

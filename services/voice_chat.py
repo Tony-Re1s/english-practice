@@ -28,7 +28,7 @@ CSS = """
 """
 
 JS = r"""
-const SILENCE_MS = 1300, MIN_SPEECH_MS = 350, MAX_UTTER_MS = 60000;
+const SILENCE_MS = 900, MIN_SPEECH_MS = 350, MAX_UTTER_MS = 60000;
 const LABELS = {
   idle:      ['🎙️', 'Toque para começar', 'Ouço sozinho e paro quando você termina de falar.'],
   listening: ['🎙️', 'Ouvindo… pode falar', 'Toque no botão para pausar.'],

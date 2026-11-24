@@ -56,3 +56,7 @@ As duas APIs cobram por uso. Configure um limite de gasto mensal em cada painel.
 - Outra voz grátis: `EDGE_VOICE` (ex.: en-US-AndrewNeural, en-GB-SoniaNeural).
 - Velocidade do "ouvir devagar": `EDGE_RATE_SLOW`.
 - Nova situação: adicione uma linha em `SCENARIOS` no `prompts.py`.
+
+## Manter o app acordado
+`.github/workflows/keep-awake.yml` roda a cada 6 horas: abre os apps num navegador e, se algum estiver dormindo, clica em "Yes, get this app back up". Para rodar na hora: GitHub → Actions → "Manter apps acordados" → Run workflow.
+Opcional: com o secret `DATABASE_URL` no repositório (Settings → Secrets and variables → Actions), ele também acorda o banco Neon.

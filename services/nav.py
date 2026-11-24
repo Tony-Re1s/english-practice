@@ -17,7 +17,7 @@ CSS = """
 .nv-b.on { background:linear-gradient(135deg, var(--acc2), var(--acc)); color:var(--ink); border-color:transparent; }
 .nv-b.menu { flex:0 0 52px; }
 @media (min-width: 700px) { .nv-b { flex-direction:row; justify-content:center; gap:8px; padding:9px 6px; }
-  .nv-b .t { font-size:14px; } .nv-b.menu { flex:0 0 58px; } }
+  .nv-b .t { font-size:14px; } .nv-b.menu { flex:0 0 58px; } .nv-b.menu .t { display:none; } }
 .nv-fab { position:fixed; top:12px; left:12px; z-index:1000; width:46px; height:46px; border-radius:14px; border:1px solid var(--edge);
   background:var(--solid); color:var(--text); font-size:22px; cursor:pointer; box-shadow:0 6px 20px rgba(0,0,0,.35); }
 .nv-shade { position:fixed; inset:0; z-index:1001; background:rgba(0,0,0,.45); opacity:0; pointer-events:none; transition: opacity .25s ease; }

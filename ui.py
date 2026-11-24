@@ -202,17 +202,17 @@ def theme_css(name: str) -> str:
 .brand span {{ color:{t['text']} !important; font-family:{t['title_font']} !important; font-size:1.3rem !important; }}
 .pill {{ background:rgba(255,255,255,.08) !important; color:{t['accent2']} !important; border-color:{t['edge']} !important; }}
 /* botões, pílulas e abas */
-.stButton > button[kind="secondary"], button[data-variant] {{
+.stButton button[kind="secondary"], button[data-variant] {{
   background:rgba(255,255,255,.07) !important; color:{t['text']} !important; border:1px solid {t['edge']} !important;
   transition: transform .15s ease, background .2s ease; }}
-.stButton > button[kind="secondary"] p, button[data-variant] p {{ color:{t['text']} !important; }}
-.stButton > button:active, button[data-variant]:active {{ transform:scale(.96); }}
+.stButton button[kind="secondary"] p, button[data-variant] p {{ color:{t['text']} !important; }}
+.stButton button:active, button[data-variant]:active {{ transform:scale(.96); }}
 button[data-variant][aria-checked="true"], button[data-variant][data-selected="true"],
-.stButton > button[kind="primary"], [data-testid="stFormSubmitButton"] button {{
+.stButton button[kind="primary"], [data-testid="stFormSubmitButton"] button {{
   background:linear-gradient(135deg, {t['accent2']}, {t['accent']}) !important; color:{t['accent_ink']} !important;
   border:none !important; box-shadow:0 6px 20px rgba(0,0,0,.35); }}
 button[data-variant][aria-checked="true"] p, button[data-variant][data-selected="true"] p,
-.stButton > button[kind="primary"] p, [data-testid="stFormSubmitButton"] button p {{ color:{t['accent_ink']} !important; }}
+.stButton button[kind="primary"] p, [data-testid="stFormSubmitButton"] button p {{ color:{t['accent_ink']} !important; }}
 [data-testid="stTab"] p {{ color:{t['muted']} !important; }}
 [data-testid="stTab"][aria-selected="true"] p {{ color:{t['accent2']} !important; }}
 [data-testid="stExpander"], [data-testid="stVerticalBlockBorderWrapper"] {{ background:rgba(255,255,255,.05) !important; border-color:{t['edge']} !important; }}
@@ -220,6 +220,10 @@ button[data-variant][aria-checked="true"] p, button[data-variant][data-selected=
 .summary {{ background:rgba(255,255,255,.06) !important; border-color:{t['edge']} !important; }}
 .bubble, .tip, .tip *, .msg .bubble * {{ color:#21414A !important; }}
 hr {{ border-color:{t['edge']} !important; }}
+/* celular e tablet */
+@media (max-width: 640px) {{ .block-container {{ padding:1rem .85rem 1.6rem !important; border-radius:20px; margin-top:6px; }}
+  .hero h1 {{ font-size:1.8rem !important; }} }}
+@media (min-width: 641px) and (max-width: 1024px) {{ .block-container {{ max-width: 720px; }} }}
 </style>"""
 
 
@@ -287,3 +291,16 @@ def scene_cards(items: list[dict], selected: str, key: str):
     """items: [{'key','label','img'}]. Retorna a chave tocada (ou None)."""
     res = _cards(key=key, data={"items": items, "selected": selected}, on_pick_change=lambda: None)
     return getattr(res, "pick", None)
+
+
+def dive_bg(url: str, surface: bool = True) -> None:
+    """Fundo de "dentro do planeta": entra com um zoom de mergulho e depois segue com o movimento lento."""
+    bg = (f"url('{url}') center/cover no-repeat" if surface else
+          f"url('{url}') center 78%/95% auto no-repeat, url('{THEMES['space']['bg']}') center/cover no-repeat")
+    st.markdown(f"""<style>
+.stApp::before {{ background: {bg} !important; background-color:#05070F !important;
+  animation: ep-dive 1.2s cubic-bezier(.2,.8,.2,1), ep-kb 48s 1.2s ease-in-out infinite alternate !important; }}
+@keyframes ep-dive {{ from {{ scale:2.6; filter: blur(12px) brightness(1.8) }} to {{ scale:1.02; filter:none }} }}
+.stApp::after {{ background: linear-gradient(180deg, rgba(3,4,14,.55) 0%, rgba(3,4,14,.15) 35%, rgba(3,4,14,.55) 100%) !important; }}
+.block-container {{ background: rgba(8,10,32,.30) !important; }}
+</style>""", unsafe_allow_html=True)

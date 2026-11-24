@@ -2,6 +2,7 @@
 
 import base64
 import json
+from html import escape as html_escape
 import uuid
 from datetime import datetime
 
@@ -12,7 +13,7 @@ from config import (DEFAULT_LEVEL, LEVELS, LIVE_MAX_SESSION_MIN, LIVE_MODEL, LIV
                     MAX_HISTORY_TURNS, PROVIDER_LABEL, PROVIDERS)
 from prompts import (FREE_TALK_OPEN, FREE_TALK_ROLE, LIVE_SYSTEM, SCENARIOS, START_MESSAGE, TOPIC_ROLE,
                      TUTOR_SYSTEM)
-from services import galaxy, db, learn, live, llm, users, voice
+from services import galaxy, nav, space, db, learn, live, llm, users, voice
 from syllabus import topic_for
 from services.voice_chat import voice_chat
 
@@ -77,6 +78,8 @@ if "theme_pref" not in ss:
 def current_theme() -> str:
     """Nível Criança → Espaço; os outros níveis → o tema escolhido em Ajustes (Londres ou Clássico)."""
     lvl = ss.get("level_pick") or ss.level
+    if ss.view == "aprender" and ss.get("kid_inside") and LEVELS.get(ss.get("kid_lvl", ""), {}).get("kids"):
+        return "space"
     if ss.view == "aprender" and not prof.level_locked and ss.get("learn_level"):
         lvl = ss.learn_level
     if LEVELS.get(lvl, {}).get("kids"):
@@ -275,19 +278,29 @@ def handle_live_end(res: dict) -> None:
         ss.live_msg = msg
 
 
-# --- Navegação (rodapé) ---------------------------------------------------------
-NAV = {"inicio": "💬 Falar", "aprender": "📚 Aprender", "historico": "📊 Histórico", "ajustes": "⚙️ Ajustes"}
-if prof.is_admin:
-    NAV["usuarios"] = "👥 Usuários"
+# --- Navegação (barra de baixo + menu lateral ☰) -----------------------------------------
+KIDS_PROFILE = (not prof.is_admin) and bool(LEVELS.get(prof.level or "", {}).get("kids"))
+NAV_ITEMS = [("inicio", "💬", "Falar"), ("aprender", "📚", "Aprender"), ("historico", "📊", "Histórico"),
+             ("ajustes", "⚙️", "Ajustes"), ("usuarios", "👥", "Usuários")]
+if KIDS_PROFILE:
+    NAV_ITEMS = [n for n in NAV_ITEMS if n[0] in ("inicio", "aprender", "ajustes")]
+elif not prof.is_admin:
+    NAV_ITEMS = [n for n in NAV_ITEMS if n[0] != "usuarios"]
+NAV = {k: f"{i} {t}" for k, i, t in NAV_ITEMS}
 
 
-def bottom_nav() -> None:
-    def _go():
-        ss.view = ss.nav or "inicio"
-    ss.nav = ss.view
+def bottom_nav(bar: bool = True) -> None:
+    """bar=True: barra completa no rodapé. bar=False: só o botão ☰ (usado durante a conversa)."""
+    items = [{"key": k, "icon": i, "label": t} for k, i, t in NAV_ITEMS]
+    if not bar:   # abre espaço para o botão ☰ que fica no canto de cima
+        st.markdown("<style>.block-container{padding-top:4.4rem !important}</style>", unsafe_allow_html=True)
     with st.bottom:
-        st.segmented_control("Navegação", list(NAV), format_func=lambda k: NAV[k], key="nav",
-                             label_visibility="collapsed", on_change=_go, width="stretch")
+        go = nav.nav(items, ss.view, current_theme(), bar=bar, key="nav_bar" if bar else "nav_fab")
+    if go and go != ss.view:
+        ss.view = go
+        if go != "aprender":
+            ss.kid_inside = None
+        st.rerun()
 
 
 # --- Tela: histórico -------------------------------------------------------------
@@ -383,6 +396,9 @@ def settings_view() -> None:
             db.set_pref(email, "tema", pick)
         st.rerun()
     st.caption("No nível Criança o app vira sempre o tema Espaço.")
+    if KIDS_PROFILE or LEVELS.get(ss.level, {}).get("kids") or ss.get("astro"):
+        with st.expander("👩‍🚀 Meu astronauta (nome e nave)"):
+            astro_form("astro_settings", "Mude o nome ou a nave quando quiser:")
     st.divider()
     st.markdown(f"**Conta:** {email}" + (" · administrador" if prof.is_admin else ""))
     lv = LEVELS.get(prof.level or "", None)
@@ -492,74 +508,227 @@ def learn_level() -> str:
                         format_func=lambda k: LEVELS[k]["label"], key="learn_level")
 
 
-def kids_galaxy(done: dict) -> int | None:
-    """Nível Criança: a trilha vira uma viagem pela galáxia. Retorna o nº do exercício escolhido."""
+def kids_astro() -> tuple[str, str]:
     if "astro" not in ss:
         ss.astro = (db.get_pref(email, "astronauta") if db.enabled() else None) or ""
     name, _, ship = ss.astro.partition("|")
-    ship = ship or "🚀"
-    if not name:
-        with st.form("astro_form"):
-            st.markdown("### 👩‍🚀 Vamos montar o seu astronauta!")
-            nm = st.text_input("Como se chama o astronauta?", max_chars=20)
-            sh = st.radio("Escolha a nave", ["🚀", "🛸", "🛰️"], horizontal=True)
-            if st.form_submit_button("Decolar! 🚀", type="primary", width="stretch") and nm.strip():
-                ss.astro = f"{nm.strip()}|{sh}"
-                if db.enabled():
-                    db.set_pref(email, "astronauta", ss.astro)
-                st.rerun()
-        return None  # (sem st.stop, para a barra de baixo continuar aparecendo)
+    return name, ship or "🚀"
 
+
+def astro_form(key: str = "astro_form", title: str = "### 👩‍🚀 Vamos montar o seu astronauta!") -> None:
+    name, ship = kids_astro()
+    with st.form(key):
+        st.markdown(title)
+        nm = st.text_input("Como se chama o astronauta?", value=name, max_chars=20)
+        ships = ["🚀", "🛸", "🛰️"]
+        sh = st.radio("Escolha a nave", ships, index=ships.index(ship) if ship in ships else 0, horizontal=True)
+        if st.form_submit_button("Decolar! 🚀", type="primary", width="stretch") and nm.strip():
+            ss.astro = f"{nm.strip()}|{sh}"
+            if db.enabled():
+                db.set_pref(email, "astronauta", ss.astro)
+            st.rerun()
+
+
+def kids_next(done: dict) -> int:
     ok = {n for n, (sc, tt) in done.items() if galaxy.passed(sc, tt)}
     nxt = 1
     while nxt in ok:
         nxt += 1
+    return nxt
+
+
+def kids_galaxy(lvl: str, done: dict) -> None:
+    """Nível Criança: o mapa da galáxia. Tocar num planeta = mergulhar nele (abre o exercício direto)."""
+    name, ship = kids_astro()
+    if not name:
+        astro_form()
+        return
+    nxt = kids_next(done)
     n_blocks = max(3, (nxt - 1) // 10 + 2)
-    jump = ss.pop("kid_jump", None)
-    if jump:
-        n_blocks = max(n_blocks, (jump - 1) // 10 + 1)
-    names = [f"Galáxia {i + 1}" for i in range(n_blocks)]
-    if jump:
-        ss.kid_blk, ss.kid_sel = names[(jump - 1) // 10], jump
+    names = [space.galaxy_name(i) for i in range(n_blocks)]
     blk = st.segmented_control("Galáxia", names, default=names[(nxt - 1) // 10], key="kid_blk",
                                label_visibility="collapsed") or names[(nxt - 1) // 10]
     b = names.index(blk)
-    nums = list(range(b * 10 + 1, b * 10 + 11))
-    sel = ss.get("kid_sel")
-    if sel not in nums:
-        sel = nxt if nxt in nums else nums[0]
-    planets = [{"num": n, "done": n in done, "stars": galaxy.stars_for(*done[n]) if n in done else 0,
-                "locked": n > nxt and not prof.is_admin, "current": n == nxt, "selected": n == sel,
-                "boss": ("sun" if b % 2 == 0 else "moon") if n % 10 == 0 else None} for n in nums]
+    g = space.GALAXIES[b % len(space.GALAXIES)]
+    planets = []
+    for n in range(b * 10 + 1, b * 10 + 11):
+        info = space.stop(n)
+        planets.append({"num": n, "name": info["en"], "img": info["img"], "done": n in done,
+                        "stars": galaxy.stars_for(*done[n]) if n in done else 0,
+                        "locked": n > nxt and not prof.is_admin, "current": n == nxt, "selected": False,
+                        "boss": ("sun" if info["key"] == "sun" else "big") if info["boss"] else None})
     stars = sum(galaxy.stars_for(*v) for v in done.values())
-    if nxt in nums:
-        say, sub = f"Hi, {name}! Let's fly to planet {nxt}!", f"Oi, {name}! Vamos voar até o planeta {nxt}!"
-    elif nxt > nums[-1]:
-        say, sub = "Wow! You finished this galaxy! 🌟", "Uau! Você completou esta galáxia!"
+    first, last = b * 10 + 1, b * 10 + 10
+    if first <= nxt <= last:
+        target = space.stop(nxt)["en"]
+        say, sub = f"Hi, {name}! Let's fly to {target}!", f"Oi, {name}! Vamos voar até {space.stop(nxt)['pt']}! Toque no planeta."
+    elif nxt > last:
+        say, sub = "Wow! You explored this whole galaxy! 🌟", "Uau! Você explorou esta galáxia inteira!"
     else:
-        say, sub = "This galaxy is still far away… 🔭", f"Primeiro termine o planeta {nxt}."
-    pick = galaxy.galaxy_map(planets, say, sub, name=name, ship=ship, total_stars=stars,
-                             foot="Acerte pelo menos metade para liberar o próximo planeta ✨", key=f"gx_{b}")
-    if pick and pick != sel:
-        ss.kid_sel = pick
+        say, sub = "This galaxy is still far away… 🔭", f"Primeiro explore {space.stop(nxt)['pt']}."
+    foot = "Acerte pelo menos metade para liberar o próximo planeta ✨"
+    if g["imaginary"]:
+        foot = "Em Andrômeda ainda não conhecemos planetas de verdade: estes são imaginários! ✨ " + foot
+    pick = galaxy.galaxy_map(planets, say, sub, name=name, ship=ship, total_stars=stars, foot=foot,
+                             galaxy=g["name"], where=g["where"], key=f"gx_{b}")
+    if pick:
+        ss.kid_inside, ss.kid_lvl = int(pick), lvl
         st.rerun()
-    ss.kid_sel = sel
-    with st.expander("👩‍🚀 Trocar nome ou nave"):
-        if st.button("Montar outro astronauta"):
-            ss.astro = ""
-            if db.enabled():
-                db.set_pref(email, "astronauta", "")
+
+
+def _say(text: str) -> None:
+    """O robô lê em inglês (voz devagar, grátis)."""
+    try:
+        audio, mime, _ = voice.speak(text.replace("___", "…"), pace="slow", log=log)
+        st.audio(audio, format=mime, autoplay=True)
+    except Exception as e:
+        st.caption(f"Não consegui falar agora: {e}")
+
+
+def kids_planet(lvl: str, num: int, done: dict) -> None:
+    """Dentro do planeta: o mapa some e a missão vira uma trilha de paradas."""
+    info = space.stop(num)
+    st.markdown(galaxy.TRAIL_CSS, unsafe_allow_html=True)
+    ui.dive_bg(info["surf"] or info["img"], surface=bool(info["surf"]))
+    if st.button("🛰️ Voltar para a galáxia", key="kp_back"):
+        ss.kid_inside = None
+        st.rerun()
+    st.markdown(f'<div class="kp-head"><img src="{info["img"]}" alt=""><div><h2>{info["en"]}</h2>'
+                f'<small>{info["pt"]} · {info["galaxy"]} · parada {num}</small></div></div>'
+                f'<div class="kp-fact">💡 {info["fact"]}</div>', unsafe_allow_html=True)
+
+    topic, rnd = topic_for(lvl, num)
+    cache = st.session_state.setdefault("ex_cache", {})
+    key = f"{lvl}:{num}"
+    ex = cache.get(key) or ((db.get_exercise(lvl, num) or {}).get("content") if db.enabled() else None)
+    if isinstance(ex, str):
+        ex = json.loads(ex)
+    if not ex:
+        with st.spinner(f"🚀 Pousando em {info['en']}..."):
+            try:
+                lv = LEVELS[lvl]
+                ex, u = learn.make_exercise(lv["guide"], lv["cefr"], topic, rnd, prof.keys.get("anthropic"))
+                log(step="exercício", provider="Anthropic", model=u["model"], ok=True,
+                    input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
+                db.save_exercise(lvl, num, topic, ex)
+            except Exception as e:
+                st.error(f"Não consegui preparar a missão: {e}")
+                return
+    cache[key] = ex
+    qs = list(ex.get("questions", []))
+    examples = [e for e in ex.get("examples", []) if 2 < len(str(e).split()) <= 9]
+    if examples:   # uma parada de "montar a frase" tocando nas palavras
+        sent = examples[0].strip()
+        qs.append({"type": "order", "prompt": "Monte a frase em inglês:", "answer": sent,
+                   "explain_pt": "Essa é uma das frases de exemplo da missão."})
+    n_stops = len(qs) + 1
+    stt = ss.setdefault(f"kp_{key}", {"i": 0, "res": {}, "ans": {}, "done": False})
+    icons = {0: "📜"} | {j + 1: "🧩" if q["type"] == "order" else "⌨️" if q["type"] == "fill" else str(j + 1)
+                        for j, q in enumerate(qs)}
+    st.markdown(galaxy.trail_html(n_stops, -1 if stt["done"] else stt["i"], stt["res"], icons),
+                unsafe_allow_html=True)
+
+    if stt["done"]:
+        score = sum(1 for v in stt["res"].values() if v)
+        total = len(qs)
+        if galaxy.passed(score, total):
+            galaxy.mascot(f"Mission complete! {'⭐' * galaxy.stars_for(score, total)}",
+                          f"Missão cumprida em {info['pt']}! Você acertou {score} de {total}.", party=True,
+                          key=f"kp_party_{num}")
+            if st.button("🚀 Voar para o próximo planeta", type="primary", width="stretch", key=f"kp_next_{num}"):
+                ss.kid_inside = num + 1
+                st.rerun()
+        else:
+            galaxy.mascot("Almost there! Try again! 💪", f"Quase! Você acertou {score} de {total}. "
+                          "Tente de novo para ganhar estrelas e liberar o próximo planeta.", key=f"kp_party_{num}")
+        c1, c2 = st.columns(2)
+        if c1.button("🔁 Fazer de novo", width="stretch", key=f"kp_redo_{num}"):
+            ss[f"kp_{key}"] = {"i": 0, "res": {}, "ans": {}, "done": False}
             st.rerun()
-    return sel
+        if c2.button("🛰️ Voltar à galáxia", width="stretch", key=f"kp_home_{num}"):
+            ss.kid_inside = None
+            st.rerun()
+        return
+
+    i = stt["i"]
+    if i == 0:   # briefing da missão: a gramática, do jeito de sempre
+        st.markdown(f'<div class="kp-card"><div style="color:#AFC0E8;font-weight:800">📜 MISSÃO</div>'
+                    f'<div class="kp-q">{html_escape(ex.get("title", topic))}</div></div>', unsafe_allow_html=True)
+        st.markdown(ex.get("explanation_pt", ""))
+        for e in ex.get("examples", []):
+            st.markdown(f"- *{e}*")
+        c1, c2 = st.columns([1, 2])
+        if c1.button("🔊 Ouvir", width="stretch", key=f"kp_say0_{num}"):
+            _say(". ".join(ex.get("examples", [])[:3]))
+        if c2.button("🚀 Começar a missão", type="primary", width="stretch", key=f"kp_go_{num}"):
+            stt["i"] = 1
+            st.rerun()
+        return
+
+    q = qs[i - 1]
+    prompt = q.get("prompt", "")
+    st.markdown(f'<div class="kp-card"><div style="color:#AFC0E8;font-weight:800">PARADA {i} DE {len(qs)}</div>'
+                f'<div class="kp-q">{html_escape(prompt)}</div></div>', unsafe_allow_html=True)
+    if q["type"] != "order" and st.button("🔊 Ouvir a frase", key=f"kp_say_{num}_{i}"):
+        _say(prompt)
+
+    def answer(given: str) -> None:
+        ok = learn.check_answer(q, given)
+        stt["res"][i] = ok
+        stt["ans"][i] = given
+        st.rerun()
+
+    if i in stt["res"]:
+        ok = stt["res"][i]
+        if ok:
+            galaxy.mascot("Great job! ⭐", f"Isso mesmo! {q.get('explain_pt', '')}", party=True, key=f"kp_fb_{num}_{i}")
+        else:
+            galaxy.mascot("Oops! Let's learn it 💡", f"A resposta é: {q['answer']}. {q.get('explain_pt', '')}",
+                          key=f"kp_fb_{num}_{i}")
+        last = i == len(qs)
+        if st.button("🏁 Ver resultado" if last else "🚀 Próxima parada", type="primary", width="stretch",
+                     key=f"kp_nx_{num}_{i}"):
+            if last:
+                stt["done"] = True
+                score = sum(1 for v in stt["res"].values() if v)
+                if db.enabled():
+                    db.exercise_done(email, lvl, num, score, len(qs), {str(k): v for k, v in stt["ans"].items()})
+            else:
+                stt["i"] = i + 1
+            st.rerun()
+        return
+
+    if q["type"] == "mc" and q.get("options"):
+        cols = st.columns(2)
+        for j, opt in enumerate(q["options"]):
+            if cols[j % 2].button(opt, key=f"kp_opt_{num}_{i}_{j}", width="stretch"):
+                answer(opt)
+    elif q["type"] == "order":
+        import random
+        words = q["answer"].split()
+        rng = random.Random(num * 31 + i)
+        shuffled = words[:]
+        while len(words) > 1 and shuffled == words:
+            rng.shuffle(shuffled)
+        got = galaxy.word_builder(shuffled, key=f"kp_wb_{num}_{i}")
+        if got:
+            answer(got)
+    else:
+        with st.form(f"kp_fill_{num}_{i}"):
+            typed = st.text_input("Escreva a resposta em inglês ✍️", key=f"kp_in_{num}_{i}")
+            if st.form_submit_button("🚀 Confirmar", type="primary", width="stretch") and typed.strip():
+                answer(typed)
 
 
 def grammar_tab(lvl: str) -> None:
     done = db.exercises_done_map(email, lvl) if db.enabled() else {}
     kids = LEVELS[lvl].get("kids", False)
     if kids:
-        num = kids_galaxy(done)
-        if num is None:
-            return
+        if ss.get("kid_inside"):
+            kids_planet(lvl, ss.kid_inside, done)
+        else:
+            kids_galaxy(lvl, done)
+        return
     else:
         st.session_state.setdefault("ex_blocks", 5)  # 5 blocos de 10 = 50 exercícios visíveis; dá para ir aumentando
         n_total = ss.ex_blocks * 10
@@ -814,6 +983,10 @@ def translator_tab() -> None:
 
 
 def learn_view() -> None:
+    if ss.get("kid_inside") and LEVELS.get(ss.get("kid_lvl", ""), {}).get("kids"):
+        # dentro do planeta: só a missão, sem título, abas nem seletor (imersão total)
+        kids_planet(ss.kid_lvl, ss.kid_inside, db.exercises_done_map(email, ss.kid_lvl) if db.enabled() else {})
+        return
     ui.hero("📚 Aprender", "Trilhas separadas da conversa: gramática por nível, vídeos para treinar a escuta e um tradutor.")
     lvl = learn_level()
     t1, t2, t3 = st.tabs(["📝 Gramática", "🎬 Vídeos", "🔤 Tradutor"])
@@ -826,7 +999,7 @@ def learn_view() -> None:
 
 
 # --- Roteamento das telas sem conversa ativa -----------------------------------------------
-if not ss.started and ss.view != "inicio":
+if ss.view != "inicio":
     {"historico": history_view, "ajustes": settings_view, "usuarios": users_view,
      "aprender": learn_view}.get(ss.view, history_view)()
     bottom_nav()
@@ -915,6 +1088,7 @@ if not ss.started:
 
 
 # --- Conversa ao vivo ------------------------------------------------------------------
+bottom_nav(bar=False)
 if ss.mode == "aovivo" and not ss.summary:
     ui.pill(ss.context_label + " · ⚡ ao vivo")
     ok, why, used = live_status()

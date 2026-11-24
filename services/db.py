@@ -30,8 +30,22 @@ SCHEMA = [
 _lock = threading.Lock()
 
 
+def _url() -> str:
+    """Acha o DATABASE_URL no topo dos Secrets ou dentro de qualquer seção (ex.: colado abaixo de [auth])."""
+    try:
+        if st.secrets.get("DATABASE_URL"):
+            return str(st.secrets["DATABASE_URL"])
+        for k in st.secrets.keys():
+            sec = st.secrets.get(k)
+            if hasattr(sec, "get") and sec.get("DATABASE_URL"):
+                return str(sec.get("DATABASE_URL"))
+    except Exception:
+        pass
+    return ""
+
+
 def enabled() -> bool:
-    return bool(st.secrets.get("DATABASE_URL", ""))
+    return bool(_url())
 
 
 @st.cache_resource
@@ -44,7 +58,7 @@ def _conn():
 
     h = _holder()
     if h["conn"] is None or h["conn"].closed:
-        h["conn"] = psycopg.connect(st.secrets["DATABASE_URL"], autocommit=True, connect_timeout=8)
+        h["conn"] = psycopg.connect(_url(), autocommit=True, connect_timeout=8)
         if not h["schema"]:
             with h["conn"].cursor() as cur:
                 for sql in SCHEMA:

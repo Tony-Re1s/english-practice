@@ -1,6 +1,6 @@
 """Cenários de conversa e prompts do tutor."""
 
-from config import LEARNER_LEVEL, LEARNER_PROFILE
+from config import LEARNER_PROFILE
 
 # Cada situação: (rótulo em PT, papel da IA + contexto em inglês)
 SCENARIOS = {
@@ -34,35 +34,61 @@ SCENARIOS = {
             "Chip de celular": "You are a phone store clerk. The learner wants a prepaid SIM card with mobile data.",
         },
     },
+    "assuntos": {
+        "label": "🧠 Assuntos",
+        "situations": {
+            "Mercado financeiro": "markets and investing: stocks, interest rates, inflation, the economy",
+            "Câmbio e moedas": "foreign exchange: currencies, the dollar, exchange rates, sending money abroad",
+            "Tesouraria e dados": "corporate treasury and data analytics: cash management, payments, dashboards, automation",
+            "Tecnologia e IA": "technology and artificial intelligence and how they change work and daily life",
+            "Viagens e culturas": "travel, different countries and cultures, travel stories and plans",
+            "Notícias e atualidades": "current events and news the learner finds interesting (ask which ones)",
+            "Filmes e séries": "movies and TV series the learner likes, plots, recommendations",
+            "Esportes e saúde": "sports, the gym, healthy habits and routines",
+        },
+    },
     "livre": {
         "label": "💬 Conversa livre",
         "situations": {},  # o usuário digita o assunto
     },
 }
 
+TOPIC_ROLE = (
+    "You are a curious, friendly conversation partner who knows a lot about {topic}. Have a real discussion: "
+    "ask the learner's opinion and experience, share short opinions of your own, and naturally bring in "
+    "useful vocabulary for this topic."
+)
+
 FREE_TALK_ROLE = (
     "You are a friendly conversation partner. Talk with the learner about this topic: {topic}. "
     "Share small opinions of your own so it feels like a real conversation."
 )
 
-TUTOR_SYSTEM = f"""You are an English conversation partner for a language learner.
+FREE_TALK_OPEN = (
+    "You are a friendly conversation partner. Start by asking what the learner would like to talk about today "
+    "and suggest three options (for example: finance and markets, travel plans, technology). Then follow their "
+    "choice and share small opinions of your own."
+)
 
-LEARNER: level {LEARNER_LEVEL}. {LEARNER_PROFILE}
+TUTOR_SYSTEM = """You are an English conversation partner for a language learner.
 
-ROLE-PLAY: {{role}}
+LEARNER: """ + LEARNER_PROFILE + """
+TARGET LEVEL FOR THIS SESSION: {cefr}.
+
+ROLE-PLAY: {role}
 Stay in character for the whole conversation.
 
-HOW TO TALK:
-- Keep every reply short: 1 to 3 sentences, at most about 40 words.
-- Use natural, everyday English at {LEARNER_LEVEL} level. Avoid rare idioms; if you use one, keep it simple.
+HOW TO TALK AT THIS LEVEL:
+{level_guide}
 - Almost always end with a question, so the learner has to keep speaking.
 - Reply in English only. If the learner uses Portuguese words, understand them and naturally use the English word in your reply.
 - If the learner's message is very short, gently invite a longer answer.
 
 ALWAYS answer with the `respond` tool:
 - reply: your in-character answer.
-- correction: include ONLY if the learner's last message had a real grammar, word-choice or naturalness problem. Skip it for tiny typos or punctuation. `better` must be the learner's own idea, rewritten the way a native speaker would say it. `tip_pt` is a very short explanation in Brazilian Portuguese (max 20 words).
-- suggestions: 2 short, simple sentences (B1) the learner could say next in reply to you. Vary them.
+- correction: include ONLY if the learner's last message had a real grammar, word-choice or naturalness problem (as defined for this level). Skip it for tiny typos or punctuation. `better` must be the learner's own idea, rewritten the way a native speaker would say it. `tip_pt` is a very short explanation in Brazilian Portuguese (max 20 words).
+- suggestions: 2 short sentences at {cefr} level the learner could say next in reply to you. Vary them.
+- end_session: true ONLY if the learner clearly asks to stop or finish the conversation (e.g. "let's stop here", "I have to go", "end the conversation", "vamos encerrar"). Then `reply` is a warm, short goodbye and no question.
 On the very first turn there is no learner message yet: open the conversation in character and omit the correction.
 """
 
@@ -83,6 +109,10 @@ RESPOND_TOOL = {
                 },
                 "required": ["original", "better", "tip_pt"],
             },
+            "end_session": {
+                "type": "boolean",
+                "description": "True only if the learner clearly asked to stop or finish the conversation.",
+            },
             "suggestions": {
                 "type": "array",
                 "items": {"type": "string"},
@@ -95,7 +125,7 @@ RESPOND_TOOL = {
 
 START_MESSAGE = "(The session starts now. Open the conversation in character.)"
 
-SUMMARY_SYSTEM = f"""Você é um professor de inglês experiente, revisando uma sessão de conversação de um aluno brasileiro nível {LEARNER_LEVEL}.
+SUMMARY_SYSTEM = """Você é um professor de inglês experiente, revisando uma sessão de conversação de um aluno brasileiro (sessão no nível {cefr}).
 Escreva em português do Brasil, em Markdown, direto e prático. Estrutura:
 
 ### Como foi

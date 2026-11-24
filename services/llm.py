@@ -12,8 +12,14 @@ def _client() -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
 
 
+def _usage(resp, model: str) -> dict:
+    u = getattr(resp, "usage", None)
+    return {"model": model, "input_tokens": getattr(u, "input_tokens", 0) or 0,
+            "output_tokens": getattr(u, "output_tokens", 0) or 0}
+
+
 def tutor_turn(system: str, messages: list[dict]) -> dict:
-    """Retorna {'reply': str, 'correction': dict|None, 'suggestions': list[str]}."""
+    """Retorna {'reply', 'correction'|None, 'suggestions', 'end_session', '_usage'}."""
     resp = _client().messages.create(
         model=CHAT_MODEL,
         max_tokens=CHAT_MAX_TOKENS,
@@ -27,11 +33,13 @@ def tutor_turn(system: str, messages: list[dict]) -> dict:
             data = dict(block.input)
             data.setdefault("correction", None)
             data["suggestions"] = list(data.get("suggestions") or [])[:3]
+            data["end_session"] = bool(data.get("end_session"))
+            data["_usage"] = _usage(resp, CHAT_MODEL)
             return data
     raise RuntimeError("O modelo não devolveu uma resposta válida.")
 
 
-def session_summary(transcript: str, corrections: list[dict]) -> str:
+def session_summary(transcript: str, corrections: list[dict], cefr: str = "B1") -> tuple[str, dict]:
     corr_txt = "\n".join(
         f"- Aluno: {c['original']} → Melhor: {c['better']} ({c['tip_pt']})" for c in corrections
     ) or "(nenhuma correção durante a sessão)"
@@ -39,7 +47,8 @@ def session_summary(transcript: str, corrections: list[dict]) -> str:
     resp = _client().messages.create(
         model=SUMMARY_MODEL,
         max_tokens=SUMMARY_MAX_TOKENS,
-        system=SUMMARY_SYSTEM,
+        system=SUMMARY_SYSTEM.format(cefr=cefr),
         messages=[{"role": "user", "content": user_msg}],
     )
-    return "".join(b.text for b in resp.content if b.type == "text").strip()
+    text = "".join(b.text for b in resp.content if b.type == "text").strip()
+    return text, _usage(resp, SUMMARY_MODEL)

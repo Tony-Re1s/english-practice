@@ -8,19 +8,33 @@ Cada etapa só entra se a chave dela estiver nos Secrets (Edge e gTTS não usam 
 
 import asyncio
 import io
+import time
 import wave
 
 import streamlit as st
 
 from config import (
-    EDGE_RATE_NORMAL, EDGE_RATE_SLOW, EDGE_VOICE,
+    EDGE_RATES, EDGE_VOICE,
     GEMINI_STT_MODEL, GEMINI_TTS_MODEL, GEMINI_VOICE,
     GROQ_STT_MODEL,
     OPENAI_STT_MODEL, OPENAI_TTS_MODEL, OPENAI_TTS_VOICE,
 )
 
-SLOW_INSTRUCTION = "Speak clearly and a bit slowly, like a patient English teacher."
-NORMAL_INSTRUCTION = "Speak naturally and clearly, in a friendly tone."
+PACE_INSTRUCTION = {
+    "slow": "Speak clearly and slowly, like a patient English teacher, with small pauses between phrases.",
+    "calm": "Speak clearly and a little slower than normal, in a friendly tone.",
+    "normal": "Speak naturally and clearly, in a friendly tone.",
+    "brisk": "Speak at a natural native-speaker pace, relaxed and friendly.",
+}
+
+
+def audio_seconds(audio: bytes) -> float | None:
+    """Duração de um WAV (None se não for WAV)."""
+    try:
+        with wave.open(io.BytesIO(audio)) as w:
+            return round(w.getnframes() / float(w.getframerate()), 2)
+    except Exception:
+        return None
 
 
 def _key(name: str) -> str:
@@ -85,35 +99,45 @@ def _stt_openai(audio: bytes, mime: str) -> str:
 
 
 STT_CHAIN = [
-    ("Groq", "GROQ_API_KEY", _stt_groq),
-    ("Gemini", "GEMINI_API_KEY", _stt_gemini),
-    ("OpenAI", "OPENAI_API_KEY", _stt_openai),
+    ("Groq", "GROQ_API_KEY", GROQ_STT_MODEL, _stt_groq),
+    ("Gemini", "GEMINI_API_KEY", GEMINI_STT_MODEL, _stt_gemini),
+    ("OpenAI", "OPENAI_API_KEY", OPENAI_STT_MODEL, _stt_openai),
 ]
 
 
-def transcribe(audio: bytes, mime: str = "audio/wav") -> tuple[str, str]:
-    """Retorna (texto, provedor_usado)."""
+def _noop(**_):
+    pass
+
+
+def transcribe(audio: bytes, mime: str = "audio/wav", log=_noop) -> tuple[str, str]:
+    """Retorna (texto, provedor_usado). Chama log(...) para cada tentativa, inclusive as que falharem."""
     errors = []
-    for name, key, fn in STT_CHAIN:
+    secs = audio_seconds(audio)
+    for name, key, model, fn in STT_CHAIN:
         if not _key(key):
             continue
+        t0 = time.time()
         try:
             text = (fn(audio, mime) or "").strip()
             if text:
+                log(step="ouvir", provider=name, model=model, ok=True, audio_seconds=secs,
+                    latency_ms=int((time.time() - t0) * 1000))
                 return text, name
             errors.append(f"{name}: vazio")
+            log(step="ouvir", provider=name, model=model, ok=False, audio_seconds=secs, error="transcrição vazia")
         except Exception as e:
             print(f"[voz] {name} falhou ao ouvir: {e}", flush=True)
             errors.append(f"{name}: {e}")
+            log(step="ouvir", provider=name, model=model, ok=False, audio_seconds=secs, error=str(e)[:500])
     raise RuntimeError("Nenhum serviço conseguiu transcrever. " + " | ".join(errors))
 
 
 # --- Falar ---------------------------------------------------------------------
-def _tts_edge(text: str, slow: bool) -> tuple[bytes, str]:
+def _tts_edge(text: str, pace: str) -> tuple[bytes, str]:
     import edge_tts
 
     async def _run() -> bytes:
-        comm = edge_tts.Communicate(text, EDGE_VOICE, rate=EDGE_RATE_SLOW if slow else EDGE_RATE_NORMAL)
+        comm = edge_tts.Communicate(text, EDGE_VOICE, rate=EDGE_RATES.get(pace, "+0%"))
         buf = bytearray()
         async for chunk in comm.stream():
             if chunk["type"] == "audio":
@@ -136,8 +160,8 @@ def _pcm_to_wav(pcm: bytes, rate: int = 24000) -> bytes:
     return buf.getvalue()
 
 
-def _tts_gemini(text: str, slow: bool) -> tuple[bytes, str]:
-    style = "slow, clear and patient" if slow else "natural, friendly and clear"
+def _tts_gemini(text: str, pace: str) -> tuple[bytes, str]:
+    style = PACE_INSTRUCTION.get(pace, PACE_INSTRUCTION["normal"])
     r = _gemini().models.generate_content(
         model=GEMINI_TTS_MODEL,
         contents=[{"role": "user", "parts": [{"text": text, "speech_metadata": {"style": style}}]}],
@@ -152,40 +176,45 @@ def _tts_gemini(text: str, slow: bool) -> tuple[bytes, str]:
     return data, "audio/wav"
 
 
-def _tts_openai(text: str, slow: bool) -> tuple[bytes, str]:
+def _tts_openai(text: str, pace: str) -> tuple[bytes, str]:
     r = _openai().audio.speech.create(
         model=OPENAI_TTS_MODEL, voice=OPENAI_TTS_VOICE, input=text,
-        instructions=SLOW_INSTRUCTION if slow else NORMAL_INSTRUCTION,
+        instructions=PACE_INSTRUCTION.get(pace, PACE_INSTRUCTION["normal"]),
         response_format="mp3",
     )
     return r.content, "audio/mp3"
 
 
-def _tts_gtts(text: str, slow: bool) -> tuple[bytes, str]:
+def _tts_gtts(text: str, pace: str) -> tuple[bytes, str]:
     from gtts import gTTS
     buf = io.BytesIO()
-    gTTS(text=text, lang="en", tld="us", slow=slow).write_to_fp(buf)
+    gTTS(text=text, lang="en", tld="us", slow=(pace == "slow")).write_to_fp(buf)
     return buf.getvalue(), "audio/mp3"
 
 
 TTS_CHAIN = [
-    ("Edge", None, _tts_edge),
-    ("Gemini", "GEMINI_API_KEY", _tts_gemini),
-    ("OpenAI", "OPENAI_API_KEY", _tts_openai),
-    ("gTTS", None, _tts_gtts),
+    ("Edge", None, EDGE_VOICE, _tts_edge),
+    ("Gemini", "GEMINI_API_KEY", GEMINI_TTS_MODEL, _tts_gemini),
+    ("OpenAI", "OPENAI_API_KEY", OPENAI_TTS_MODEL, _tts_openai),
+    ("gTTS", None, "gtts", _tts_gtts),
 ]
 
 
-def speak(text: str, slow: bool = False) -> tuple[bytes, str, str]:
-    """Retorna (bytes_do_audio, mime, provedor_usado)."""
+def speak(text: str, pace: str = "normal", log=_noop) -> tuple[bytes, str, str]:
+    """Retorna (bytes_do_audio, mime, provedor_usado). pace: slow | calm | normal | brisk."""
     errors = []
-    for name, key, fn in TTS_CHAIN:
+    for name, key, model, fn in TTS_CHAIN:
         if key and not _key(key):
             continue
+        t0 = time.time()
         try:
-            data, mime = fn(text, slow)
+            data, mime = fn(text, pace)
             if data:
+                log(step="falar", provider=name, model=model, ok=True, chars=len(text),
+                    latency_ms=int((time.time() - t0) * 1000))
                 return data, mime, name
         except Exception as e:
+            print(f"[voz] {name} falhou ao falar: {e}", flush=True)
             errors.append(f"{name}: {e}")
+            log(step="falar", provider=name, model=model, ok=False, chars=len(text), error=str(e)[:500])
     raise RuntimeError("Nenhum serviço conseguiu gerar a voz. " + " | ".join(errors))

@@ -3,7 +3,10 @@
 Parceira de conversação em inglês (nível B1) com voz, correções curtas a cada fala e resumo no fim da sessão.
 
 ## O que tem
-- **4 cenários**: Dia a dia, Trabalho, Intercâmbio/viagem e Conversa livre (você escolhe o assunto). 15 situações prontas de role-play.
+- **3 níveis**: 🌱 Básico (A2), 🌿 Intermediário (B1), 🌳 Avançado (B2-C1) — muda vocabulário, tamanho das respostas, rigor das correções e ritmo da voz.
+- **5 cenários**: Dia a dia, Trabalho, Intercâmbio/viagem, 🧠 Assuntos (mercado financeiro, câmbio, tesouraria, tecnologia...) e Conversa livre.
+- **📊 Uso e histórico**: cada IA usada (conversa, ouvir, falar), falhas e trocas de serviço, custo estimado, alerta se a OpenAI foi usada, e todas as conversas antigas com correções e resumo (precisa `DATABASE_URL`).
+- **Encerrar**: botão ou diga *"let's stop here"* — desliga o microfone e mostra o resumo.
 - **Conversa contínua (mãos livres)**: toque no microfone uma vez; ele para sozinho quando você termina de falar, toca a resposta e volta a ouvir. Toque de novo para pausar. Também há o modo **Apertar para falar**.
 - **Voz nos dois sentidos** com botão **🐢 Ouvir devagar**.
 - **Voz com reserva**: ouvir usa Groq → Gemini → OpenAI; falar usa Edge (grátis) → Gemini → OpenAI → gTTS. Só cai no pago se o grátis falhar.
@@ -20,6 +23,7 @@ services/voice_chat.py  # microfone mãos-livres (componente no navegador)
 config.py            # modelos, voz, velocidade, nível — mude aqui
 prompts.py           # cenários, situações e prompts do tutor
 services/llm.py      # Claude (conversa, correções, resumo)
+services/db.py       # registro de uso, sessões e falas (Postgres/Neon)
 services/voice.py    # voz com fallback: grátis primeiro, OpenAI por último
 ```
 
@@ -30,6 +34,7 @@ services/voice.py    # voz com fallback: grátis primeiro, OpenAI por último
 | `GROQ_API_KEY` | Ouvir sua fala, grátis (console.groq.com) | Não |
 | `GEMINI_API_KEY` | Ouvir e falar, 2ª opção (aistudio.google.com) | Não |
 | `OPENAI_API_KEY` | Ouvir e falar, reserva paga (platform.openai.com) | Não |
+| `DATABASE_URL` | Registro de uso e histórico (Neon, grátis) | Recomendado |
 | `[auth]` + `ALLOWED_EMAILS` | Login com Google; só os e-mails da lista entram | Recomendado |
 
 As duas APIs cobram por uso. Configure um limite de gasto mensal em cada painel.

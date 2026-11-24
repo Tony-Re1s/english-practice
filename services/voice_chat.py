@@ -86,6 +86,10 @@ export default function (component) {
     S.ico = wrap.querySelector('.vc-ico'); S.status = wrap.querySelector('.vc-status'); S.hint = wrap.querySelector('.vc-hint');
     S.ring = wrap.querySelector('.vc-ring');
     S.btn.addEventListener('click', () => onTap(S));
+    // conversa encerrada (componente saiu da tela) → desliga microfone e áudio
+    S.watch = setInterval(() => {
+      if (!S.wrap.isConnected) { try { S.audio.pause(); } catch (e) {} S.recording = false; shutdown(S); clearInterval(S.watch); }
+    }, 700);
     setState(S, 'idle');
   }
   S.send = setTriggerValue;

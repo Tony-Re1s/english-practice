@@ -1,0 +1,155 @@
+"""Registro de uso e histórico (Postgres/Neon). Tudo opcional: sem DATABASE_URL o app funciona igual.
+
+Tabelas (criadas automaticamente):
+  ep_sessions  — cada conversa (nível, cenário, início/fim, resumo)
+  ep_turns     — cada fala (sua e da parceira) com a correção
+  ep_usage     — cada chamada de IA: etapa, serviço, modelo, ok/erro, custo estimado
+"""
+
+import json
+import threading
+
+import streamlit as st
+
+from config import FREE_PROVIDERS, PRICES
+
+SCHEMA = [
+    """create table if not exists ep_sessions (
+        id bigserial primary key, user_email text, started_at timestamptz default now(),
+        ended_at timestamptz, level text, context_label text, summary text)""",
+    """create table if not exists ep_turns (
+        id bigserial primary key, session_id bigint references ep_sessions(id) on delete cascade,
+        ts timestamptz default now(), role text, text text, correction jsonb)""",
+    """create table if not exists ep_usage (
+        id bigserial primary key, ts timestamptz default now(), user_email text, session_id bigint,
+        step text, provider text, model text, ok boolean, input_tokens int, output_tokens int,
+        audio_seconds numeric, chars int, latency_ms int, est_cost_usd numeric, error text)""",
+    "create index if not exists ep_usage_ts on ep_usage (ts desc)",
+]
+
+_lock = threading.Lock()
+
+
+def enabled() -> bool:
+    return bool(st.secrets.get("DATABASE_URL", ""))
+
+
+@st.cache_resource
+def _holder() -> dict:
+    return {"conn": None, "schema": False}
+
+
+def _conn():
+    import psycopg
+
+    h = _holder()
+    if h["conn"] is None or h["conn"].closed:
+        h["conn"] = psycopg.connect(st.secrets["DATABASE_URL"], autocommit=True, connect_timeout=8)
+        if not h["schema"]:
+            with h["conn"].cursor() as cur:
+                for sql in SCHEMA:
+                    cur.execute(sql)
+            h["schema"] = True
+    return h["conn"]
+
+
+def _run(sql: str, params=(), fetch: bool = False):
+    """Executa com 1 nova tentativa (o Neon derruba conexões ociosas)."""
+    if not enabled():
+        return [] if fetch else None
+    for attempt in (1, 2):
+        try:
+            with _lock:
+                with _conn().cursor() as cur:
+                    cur.execute(sql, params)
+                    if fetch:
+                        cols = [d.name for d in cur.description]
+                        return [dict(zip(cols, r)) for r in cur.fetchall()]
+                    return cur.fetchone()[0] if cur.description else None
+        except Exception as e:
+            _holder()["conn"] = None
+            if attempt == 2:
+                print(f"[db] falha: {e}", flush=True)
+                return [] if fetch else None
+
+
+# --- custo -----------------------------------------------------------------------
+def estimate_cost(provider: str, model: str, input_tokens=0, output_tokens=0,
+                  audio_seconds=None, chars=None) -> float:
+    if provider in FREE_PROVIDERS:
+        return 0.0
+    if model in PRICES and isinstance(PRICES[model], tuple):
+        pin, pout = PRICES[model]
+        return (input_tokens or 0) / 1e6 * pin + (output_tokens or 0) / 1e6 * pout
+    per_min = PRICES.get(f"{model}_per_min")
+    if per_min:
+        if audio_seconds:
+            return float(audio_seconds) / 60 * per_min
+        if chars:  # fala gerada: ~15 caracteres por segundo
+            return chars / 15 / 60 * per_min
+    return 0.0
+
+
+# --- escrita ---------------------------------------------------------------------
+def log_usage(user_email: str, session_id, step: str, provider: str, model: str, ok: bool = True,
+              input_tokens=None, output_tokens=None, audio_seconds=None, chars=None,
+              latency_ms=None, error=None) -> None:
+    cost = estimate_cost(provider, model, input_tokens, output_tokens, audio_seconds, chars) if ok else 0.0
+    _run("""insert into ep_usage (user_email, session_id, step, provider, model, ok, input_tokens, output_tokens,
+                                  audio_seconds, chars, latency_ms, est_cost_usd, error)
+            values (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)""",
+         (user_email, session_id, step, provider, model, ok, input_tokens, output_tokens,
+          audio_seconds, chars, latency_ms, round(cost, 6), error))
+
+
+def start_session(user_email: str, level: str, context_label: str):
+    return _run("insert into ep_sessions (user_email, level, context_label) values (%s,%s,%s) returning id",
+                (user_email, level, context_label))
+
+
+def add_turn(session_id, role: str, text: str, correction: dict | None = None) -> None:
+    if session_id is None:
+        return
+    _run("insert into ep_turns (session_id, role, text, correction) values (%s,%s,%s,%s)",
+         (session_id, role, text, json.dumps(correction) if correction else None))
+
+
+def end_session(session_id, summary: str | None) -> None:
+    if session_id is None:
+        return
+    _run("update ep_sessions set ended_at = now(), summary = coalesce(%s, summary) where id = %s",
+         (summary, session_id))
+
+
+# --- leitura (tela de uso) ---------------------------------------------------------
+def usage_by_provider(user_email: str, days: int = 30) -> list[dict]:
+    return _run("""select step as etapa, provider as servico, model as modelo,
+                          count(*) filter (where ok) as chamadas, count(*) filter (where not ok) as falhas,
+                          round(sum(est_cost_usd)::numeric, 4) as custo_usd
+                   from ep_usage where user_email = %s and ts > now() - make_interval(days => %s)
+                   group by 1,2,3 order by 1, custo_usd desc, chamadas desc""",
+                (user_email, days), fetch=True)
+
+
+def usage_recent(user_email: str, limit: int = 60) -> list[dict]:
+    return _run("""select to_char(ts at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI:SS') as quando,
+                          step as etapa, provider as servico, model as modelo, ok,
+                          round(est_cost_usd::numeric, 5) as custo_usd, latency_ms as ms, error as erro
+                   from ep_usage where user_email = %s order by ts desc limit %s""",
+                (user_email, limit), fetch=True)
+
+
+def sessions_recent(user_email: str, limit: int = 30) -> list[dict]:
+    return _run("""select s.id, to_char(s.started_at at time zone 'America/Sao_Paulo', 'DD/MM/YYYY HH24:MI') as inicio,
+                          s.level as nivel, s.context_label as conversa,
+                          (select count(*) from ep_turns t where t.session_id = s.id and t.role = 'user') as falas,
+                          (select round(coalesce(sum(u.est_cost_usd),0)::numeric, 4) from ep_usage u
+                             where u.session_id = s.id) as custo_usd,
+                          s.summary
+                   from ep_sessions s where s.user_email = %s order by s.started_at desc limit %s""",
+                (user_email, limit), fetch=True)
+
+
+def session_turns(session_id: int) -> list[dict]:
+    return _run("select role, text, correction from ep_turns where session_id = %s order by id",
+                (session_id,), fetch=True)

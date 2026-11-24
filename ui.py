@@ -59,6 +59,8 @@ footer {{ display:none !important; }}
 [data-testid="stBottom"] [data-testid="stButtonGroup"] > div {{ width:100%; display:flex; }}
 [data-testid="stBottom"] [data-testid="stButtonGroup"] button {{ flex:1; border-radius:14px !important; font-weight:700; }}
 .brand {{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }}
+.vid-title {{ text-align:center; font-weight:800; font-size:1.05rem; line-height:1.3; }}
+.vid-title small {{ display:block; font-weight:600; font-size:.8rem; opacity:.7; }}
 .brand img {{ width:38px; height:38px; border-radius:10px; box-shadow:0 2px 8px rgba(33,65,74,.12); }}
 .brand span {{ font-weight:800; font-size:1.15rem; color:{INK}; }}
 </style>
@@ -220,6 +222,10 @@ button[data-variant][aria-checked="true"] p, button[data-variant][data-selected=
 .summary {{ background:rgba(255,255,255,.06) !important; border-color:{t['edge']} !important; }}
 .bubble, .tip, .tip *, .msg .bubble * {{ color:#21414A !important; }}
 hr {{ border-color:{t['edge']} !important; }}
+[data-testid="stLinkButton"] a, [data-testid="stDownloadButton"] button {{ background:rgba(255,255,255,.10) !important;
+  color:{t['text']} !important; border:1px solid {t['edge']} !important; }}
+[data-testid="stLinkButton"] a p, [data-testid="stLinkButton"] a span, [data-testid="stDownloadButton"] button p {{ color:{t['text']} !important; }}
+.vid-title {{ color:{t['text']}; }}
 /* celular e tablet */
 @media (max-width: 640px) {{ .block-container {{ padding:1rem .85rem 1.6rem !important; border-radius:20px; margin-top:6px; }}
   .hero h1 {{ font-size:1.8rem !important; }} }}
@@ -304,3 +310,63 @@ def dive_bg(url: str, surface: bool = True) -> None:
 .stApp::after {{ background: linear-gradient(180deg, rgba(3,4,14,.55) 0%, rgba(3,4,14,.15) 35%, rgba(3,4,14,.55) 100%) !important; }}
 .block-container {{ background: rgba(8,10,32,.30) !important; }}
 </style>""", unsafe_allow_html=True)
+
+
+# --- Vídeo do YouTube com legenda ligada/desligada --------------------------------------------
+_YT_JS = """
+export default function (component) {
+  const { data, parentElement } = component;
+  const src = `https://www.youtube-nocookie.com/embed/${data.id}?rel=0&modestbranding=1&playsinline=1&hl=en`
+            + (data.cc ? '&cc_load_policy=1&cc_lang_pref=en' : '&cc_load_policy=0');
+  let box = parentElement.querySelector('.yt');
+  if (box && box.dataset.src === src) return;
+  if (box) box.remove();
+  box = document.createElement('div'); box.className = 'yt'; box.dataset.src = src;
+  box.innerHTML = `<iframe src="${src}" title="Vídeo" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
+    allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
+  parentElement.appendChild(box);
+}
+"""
+_YT_CSS = """
+.yt { position:relative; width:100%; aspect-ratio:16/9; border-radius:16px; overflow:hidden; background:#000;
+  box-shadow:0 10px 30px rgba(0,0,0,.35); }
+.yt iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }
+"""
+_yt = st.components.v2.component("english_youtube", css=_YT_CSS, js=_YT_JS)
+
+
+def youtube(video_id: str, captions: bool = True) -> None:
+    _yt(key="yt_player", data={"id": video_id, "cc": bool(captions)})
+
+
+# --- Resumo da conversa em PDF ---------------------------------------------------------------
+def _latin(text: str) -> str:
+    import re
+    text = re.sub(r"[*_#`>]", "", text or "")
+    return text.encode("latin-1", "ignore").decode("latin-1")
+
+
+def summary_pdf(title: str, summary: str, transcript: str) -> bytes:
+    from fpdf import FPDF
+    pdf = FPDF()
+    pdf.set_auto_page_break(True, 15)
+    _mc = pdf.multi_cell
+    pdf.multi_cell = lambda w, h, txt: _mc(w, h, txt or " ", new_x="LMARGIN", new_y="NEXT")
+    pdf.add_page()
+    pdf.set_font("Helvetica", "B", 16)
+    pdf.multi_cell(0, 9, _latin("Sessão de inglês"))
+    pdf.set_font("Helvetica", "", 11)
+    pdf.multi_cell(0, 6, _latin(title))
+    pdf.ln(3)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.multi_cell(0, 8, "Resumo")
+    pdf.set_font("Helvetica", "", 11)
+    for line in _latin(summary).splitlines():
+        pdf.multi_cell(0, 6, line)
+    pdf.ln(4)
+    pdf.set_font("Helvetica", "B", 13)
+    pdf.multi_cell(0, 8, _latin("Transcrição"))
+    pdf.set_font("Helvetica", "", 10)
+    for line in _latin(transcript).splitlines():
+        pdf.multi_cell(0, 5.5, line)
+    return bytes(pdf.output())

@@ -5,3 +5,4 @@ google-genai>=1.0
 edge-tts>=7.0
 gTTS>=2.5
 psycopg[binary]>=3.2
+fpdf2>=2.7

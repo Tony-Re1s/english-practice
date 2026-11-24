@@ -732,8 +732,7 @@ def grammar_tab(lvl: str) -> None:
     else:
         st.session_state.setdefault("ex_blocks", 5)  # 5 blocos de 10 = 50 exercícios visíveis; dá para ir aumentando
         n_total = ss.ex_blocks * 10
-        st.caption(f"Concluídos neste nível: **{len(done)}** de {n_total}. O exercício nº é sempre o mesmo para todo mundo "
-                   "do mesmo nível — dá para combinar \"hoje do 1 ao 3\".")
+        st.caption(f"Concluídos: **{len(done)}** de {n_total}")
         blocks = [f"{i * 10 + 1}–{i * 10 + 10}" for i in range(ss.ex_blocks)]
         blk = st.segmented_control("Bloco", blocks, default=blocks[0], key=f"blk_{lvl}") or blocks[0]
         start = int(blk.split("–")[0])
@@ -855,26 +854,48 @@ def videos_tab(lvl: str) -> None:
                                        "adicione o resto pelo \"Adicionar vídeo\" (os que já existem não duplicam).")
                     except Exception as e:
                         st.error(f"Não consegui ler a playlist: {e}")
+        with st.expander("📦 Séries e níveis"):
+            for row in db.series_summary():
+                c1, c2, c3 = st.columns([3, 2, 1], vertical_alignment="center")
+                c1.markdown(f"**{row['series']}** · {row['n']} vídeos")
+                new = c2.selectbox("Nível", list(LEVELS), index=list(LEVELS).index(row["level"]) if row["level"] in LEVELS else 0,
+                                   format_func=lambda k: LEVELS[k]["label"], key=f"sl_{row['series']}",
+                                   label_visibility="collapsed")
+                if new != row["level"]:
+                    db.set_series_level(row["series"], new)
+                    st.rerun()
+                if c3.button("🗑️", key=f"sd_{row['series']}", help="Apagar a série"):
+                    db.delete_series(row["series"])
+                    st.rerun()
     vids = db.list_videos(lvl)
     if not vids:
-        st.caption("Ainda não há vídeos neste nível." + (" Adicione pelo botão acima." if prof.is_admin else
-                                                          " Peça ao administrador para adicionar."))
+        st.caption("Ainda não há vídeos neste nível.")
         return
     done = db.videos_done_map(email)
     series = sorted({v.get("series") or "Avulsos" for v in vids})
     if len(series) > 1:
         pick = st.segmented_control("Série", series, default=series[0], key=f"vser_{lvl}") or series[0]
         vids = [v for v in vids if (v.get("series") or "Avulsos") == pick]
-    label = {v["id"]: f"{'✅ ' if v['id'] in done else ''}{i + 1}. {v['title']}" for i, v in enumerate(vids)}
-    vid_id = st.selectbox("Vídeo", list(label), format_func=lambda k: label[k], key=f"vsel_{lvl}")
-    v = next(x for x in vids if x["id"] == vid_id)
-    st.video(v["url"])
+    ikey = f"vidx_{lvl}_{vids[0].get('series') or ''}"
+    idx = min(max(ss.get(ikey, 0), 0), len(vids) - 1)
+    b1, mid, b2 = st.columns([1, 5, 1], vertical_alignment="center")
+    if b1.button("◀", key=f"vprev_{ikey}", disabled=idx == 0, width="stretch"):
+        ss[ikey] = idx - 1
+        st.rerun()
+    if b2.button("▶", key=f"vnext_{ikey}", disabled=idx >= len(vids) - 1, width="stretch"):
+        ss[ikey] = idx + 1
+        st.rerun()
+    v = vids[idx]
+    mid.markdown(f'<div class="vid-title">{"✅ " if v["id"] in done else ""}{html_escape(v["title"])}'
+                 f'<small>{idx + 1} de {len(vids)}</small></div>', unsafe_allow_html=True)
+    cc = st.toggle("Legendas em inglês", value=ss.get("vid_cc", True), key="vid_cc")
+    ui.youtube(v["youtube_id"], captions=cc)
     st.link_button("▶️ Não tocou aqui? Abrir no YouTube", v["url"], width="stretch")
     notes = v.get("notes")
     notes_json = json.dumps(notes, ensure_ascii=False) if isinstance(notes, (dict, list)) else (notes or "")
     if not notes_json:
         gem = prof.keys.get("gemini") or users.owner_key("gemini")
-        if st.button("📖 Preparar perguntas (o Gemini assiste o vídeo uma única vez)", type="primary", width="stretch"):
+        if st.button("📖 Preparar perguntas", type="primary", width="stretch"):
             with st.spinner("O Gemini está assistindo o vídeo..."):
                 try:
                     notes_json, _ = learn.video_summary(v["url"], gem)
@@ -936,7 +957,6 @@ def videos_tab(lvl: str) -> None:
 
 
 def translator_tab() -> None:
-    st.caption("Digite ou fale uma palavra ou frase, em inglês ou português.")
     text = st.text_input("O que você quer traduzir?", key="tr_text", placeholder="ex.: 'cash flow' ou 'fazer hora extra'")
     rec = st.audio_input("…ou fale", key=f"tr_mic_{st.session_state.get('tr_mic', 0)}") if voice.can_listen() else None
     go = st.button("🔤 Traduzir", type="primary", width="stretch")
@@ -1035,7 +1055,7 @@ if not ss.started:
                        selection_mode="single", key="mode_pick") or ss.mode
     if live_ok:
         st.caption(f"⚡ Ao vivo: {max(0, prof.live_daily_minutes - live_used / 60):.0f} de "
-                   f"{prof.live_daily_minutes} min hoje · Gemini grátis")
+                   f"{prof.live_daily_minutes} min hoje")
     elif prof.live_enabled:
         st.caption(f"⚡ Ao vivo indisponível: {live_why}.")
 
@@ -1163,8 +1183,12 @@ def summary_block() -> None:
     stamp = datetime.now().strftime("%Y-%m-%d_%H%M")
     doc = f"# Sessão de inglês — {ss.context_label}\n\n{ss.summary}\n\n---\n\n## Transcrição\n\n{transcript_text()}\n"
     d1, d2 = st.columns(2)
-    d1.download_button("⬇️ Baixar resumo (.md)", doc, file_name=f"sessao_ingles_{stamp}.md",
-                       mime="text/markdown", width="stretch")
+    try:
+        d1.download_button("⬇️ Baixar resumo (PDF)", ui.summary_pdf(ss.context_label, ss.summary, transcript_text()),
+                           file_name=f"sessao_ingles_{stamp}.pdf", mime="application/pdf", width="stretch")
+    except Exception:
+        d1.download_button("⬇️ Baixar resumo", doc, file_name=f"sessao_ingles_{stamp}.txt", mime="text/plain",
+                           width="stretch")
     if d2.button("✅ Concluir e voltar ao início", type="primary", width="stretch"):
         reset_session()
         st.rerun()

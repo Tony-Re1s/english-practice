@@ -328,3 +328,17 @@ def get_pref(user_email: str, key: str) -> str | None:
 def set_pref(user_email: str, key: str, value: str) -> None:
     _run("""insert into ep_prefs (user_email, key, value) values (%s,%s,%s)
             on conflict (user_email, key) do update set value = excluded.value""", (user_email, key, value))
+
+
+# --- séries de vídeos (admin) ------------------------------------------------------------
+def series_summary() -> list[dict]:
+    return _run("""select coalesce(series, 'Avulsos') as series, mode() within group (order by level) as level, count(*) as n
+                   from ep_videos group by 1 order by 1""", fetch=True)
+
+
+def set_series_level(series: str, level: str) -> None:
+    _run("update ep_videos set level = %s where coalesce(series, 'Avulsos') = %s", (level, series))
+
+
+def delete_series(series: str) -> None:
+    _run("delete from ep_videos where coalesce(series, 'Avulsos') = %s", (series,))

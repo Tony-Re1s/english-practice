@@ -19,7 +19,7 @@ def check_login() -> bool:
     """
     if "auth" not in st.secrets:
         return True
-    if not st.user.is_logged_in:
+    if not st.user.get("is_logged_in", False):
         st.title("🗣️ English Practice")
         st.write("Entre com sua conta Google para praticar.")
         st.button("Entrar com Google", on_click=st.login, type="primary")
@@ -152,7 +152,7 @@ with st.sidebar:
         st.caption(f"Falas suas: {user_turns} · Correções: {len(ss.corrections)}")
     if not voice.has_openai():
         st.info("Sem OPENAI_API_KEY: microfone desligado e voz básica (gTTS).", icon="🎙️")
-    if "auth" in st.secrets and st.user.is_logged_in:
+    if "auth" in st.secrets and st.user.get("is_logged_in", False):
         st.divider()
         st.caption(f"Conectado como {st.user.get('email', '')}")
         st.button("Sair", on_click=st.logout, use_container_width=True)

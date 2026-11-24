@@ -15,7 +15,7 @@ import wave
 import streamlit as st
 
 from config import (
-    EDGE_RATES, EDGE_VOICE,
+    EDGE_RATES, EDGE_VOICE, KID_EDGE_VOICE, KID_PITCH, KID_STYLE,
     GEMINI_STT_MODEL, GEMINI_TTS_MODEL, GEMINI_VOICE,
     GROQ_STT_MODEL,
     OPENAI_STT_MODEL, OPENAI_TTS_MODEL, OPENAI_TTS_VOICE,
@@ -160,11 +160,23 @@ def transcribe(audio: bytes, mime: str = "audio/wav", log=_noop, language: str |
 
 
 # --- Falar ---------------------------------------------------------------------
+def set_kid_voice(on: bool) -> None:
+    """Modo Criança: voz infantil de robozinho (vale para esta sessão)."""
+    _local.kid = bool(on)
+
+
+def _kid() -> bool:
+    return bool(getattr(_local, "kid", False))
+
+
 def _tts_edge(text: str, pace: str) -> tuple[bytes, str]:
     import edge_tts
 
     async def _run() -> bytes:
-        comm = edge_tts.Communicate(text, EDGE_VOICE, rate=EDGE_RATES.get(pace, "+0%"))
+        if _kid():
+            comm = edge_tts.Communicate(text, KID_EDGE_VOICE, rate=EDGE_RATES.get(pace, "+0%"), pitch=KID_PITCH)
+        else:
+            comm = edge_tts.Communicate(text, EDGE_VOICE, rate=EDGE_RATES.get(pace, "+0%"))
         buf = bytearray()
         async for chunk in comm.stream():
             if chunk["type"] == "audio":
@@ -188,7 +200,7 @@ def _pcm_to_wav(pcm: bytes, rate: int = 24000) -> bytes:
 
 
 def _tts_gemini(text: str, pace: str) -> tuple[bytes, str]:
-    style = PACE_INSTRUCTION.get(pace, PACE_INSTRUCTION["normal"])
+    style = PACE_INSTRUCTION.get(pace, PACE_INSTRUCTION["normal"]) + (" " + KID_STYLE if _kid() else "")
     r = _gemini().models.generate_content(
         model=GEMINI_TTS_MODEL,
         contents=[{"role": "user", "parts": [{"text": text, "speech_metadata": {"style": style}}]}],
@@ -206,7 +218,7 @@ def _tts_gemini(text: str, pace: str) -> tuple[bytes, str]:
 def _tts_openai(text: str, pace: str) -> tuple[bytes, str]:
     r = _openai().audio.speech.create(
         model=OPENAI_TTS_MODEL, voice=OPENAI_TTS_VOICE, input=text,
-        instructions=PACE_INSTRUCTION.get(pace, PACE_INSTRUCTION["normal"]),
+        instructions=PACE_INSTRUCTION.get(pace, PACE_INSTRUCTION["normal"]) + (" " + KID_STYLE if _kid() else ""),
         response_format="mp3",
     )
     return r.content, "audio/mp3"

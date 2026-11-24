@@ -93,6 +93,7 @@ def _set_level(widget_key: str) -> None:
 
 
 ui.apply_theme(current_theme())
+voice.set_kid_voice(bool(LEVELS.get(ss.level, {}).get("kids")))   # modo Criança: voz infantil de robozinho
 if prof.level_locked:
     ss.level = prof.level
 
@@ -1113,7 +1114,18 @@ if not ss.started:
         scen_key = st.pills("Cenário", scen_keys, format_func=lambda k: SCENARIOS[k]["label"],
                             default=scen_keys[0], selection_mode="single", key=f"scen_{int(bool(kids))}") or scen_keys[0]
     scen = SCENARIOS[scen_key]
-    if scen["situations"]:
+    if scen_key == "criancas":
+        # a fase da conversa acompanha a galáxia em que ele está na trilha (dá para escolher outra)
+        phases = list(scen["phases"])
+        done_k = db.exercises_done_map(email, ss.level) if db.enabled() else {}
+        cur_ph = phases[min(((kids_next(done_k) - 1) // 10), len(phases) - 1)]
+        phase = st.pills("Fase", phases, default=cur_ph, selection_mode="single", key="kid_phase") or cur_ph
+        sits = scen["phases"][phase]
+        situation = st.pills("Assunto", list(sits), selection_mode="single", default=list(sits)[0],
+                             key=f"sit_kid_{phases.index(phase)}") or list(sits)[0]
+        role = sits[situation]
+        context_label = f"{scen['label']} · {situation}"
+    elif scen["situations"]:
         situation = st.pills("Assunto" if scen_key == "assuntos" else "Situação", list(scen["situations"]),
                              selection_mode="single", default=list(scen["situations"])[0],
                              key=f"sit_{scen_key}") or list(scen["situations"])[0]

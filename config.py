@@ -15,6 +15,10 @@ OPENAI_STT_MODEL = "gpt-4o-mini-transcribe"    # pago; a OpenAI desliga em 26/02
 
 # Falar as respostas
 EDGE_VOICE = "en-US-AvaNeural"                 # grátis, sem chave (vozes neurais da Microsoft)
+KID_EDGE_VOICE = "en-US-AnaNeural"             # voz infantil (criança), dicção bem clara — modo Criança
+KID_PITCH = "+6Hz"                             # um pouco mais agudo, jeito de robozinho simpático
+KID_STYLE = ("Speak like Bip, a cheerful little robot friend for young children: bright, warm and playful, "
+             "with very clear diction and short pauses between phrases.")
 EDGE_RATES = {"slow": "-25%", "calm": "-12%", "normal": "+0%", "brisk": "+6%"}   # "slow" = botão ouvir devagar
 GEMINI_TTS_MODEL = "gemini-3.8-flash-lite-tts"
 GEMINI_VOICE = "Kore"

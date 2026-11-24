@@ -52,6 +52,7 @@ DEFAULTS = {
     "autoplay": False,
     "summary": None,
     "voice_used": "",
+    "last_error": "",
 }
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v if not isinstance(v, list) else list(v))
@@ -128,9 +129,11 @@ def handle_audio(audio: bytes, mime: str) -> None:
         with st.spinner("Ouvindo..."):
             heard, provider = voice.transcribe(audio, mime)
         ss.voice_used = f"ouvido por: {provider}"
+        ss.last_error = ""
         handle_user(heard)
     except Exception as e:
-        st.toast(f"Não entendi o áudio: {e}", icon="⚠️")
+        print(f"[voz] falha ao ouvir ({mime}, {len(audio)} bytes): {e}", flush=True)
+        ss.last_error = f"Não consegui entender o áudio. Detalhe técnico: {e}"
     finally:
         ss.listen_token += 1
 
@@ -268,6 +271,8 @@ if ss.summary:
     st.stop()
 
 # --- Entrada ------------------------------------------------------------------
+if ss.last_error:
+    st.warning(ss.last_error, icon="⚠️")
 if continuous:
     audio_b64 = base64.b64encode(ss.audio[0]).decode() if ss.audio else None
     utter = voice_chat(ss.reply_seq, audio_b64, ss.audio[1] if ss.audio else None, ss.listen_token)

@@ -103,6 +103,7 @@ def transcribe(audio: bytes, mime: str = "audio/wav") -> tuple[str, str]:
                 return text, name
             errors.append(f"{name}: vazio")
         except Exception as e:
+            print(f"[voz] {name} falhou ao ouvir: {e}", flush=True)
             errors.append(f"{name}: {e}")
     raise RuntimeError("Nenhum serviço conseguiu transcrever. " + " | ".join(errors))
 

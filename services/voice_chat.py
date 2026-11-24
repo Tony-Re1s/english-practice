@@ -37,10 +37,35 @@ const LABELS = {
   error:     ['⚠️', 'Não consegui usar o microfone', 'Permita o microfone no navegador e toque de novo.'],
 };
 
-function pickMime() {
-  const opts = ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4', 'audio/ogg;codecs=opus'];
-  for (const m of opts) { if (window.MediaRecorder && MediaRecorder.isTypeSupported && MediaRecorder.isTypeSupported(m)) return m; }
-  return '';
+const TARGET_RATE = 16000, PREROLL_SEC = 0.6;
+
+function encodeWav(chunks, inRate) {
+  // junta os pedaços, reduz para 16 kHz mono e grava como WAV 16-bit (aceito por Groq, Gemini e OpenAI)
+  let len = 0; for (const c of chunks) len += c.length;
+  const all = new Float32Array(len); let o = 0; for (const c of chunks) { all.set(c, o); o += c.length; }
+  const ratio = inRate / TARGET_RATE;
+  const outLen = Math.floor(all.length / ratio);
+  const pcm = new Int16Array(outLen);
+  for (let i = 0; i < outLen; i++) {
+    const a = Math.floor(i * ratio), b = Math.min(all.length, Math.floor((i + 1) * ratio));
+    let sum = 0; for (let j = a; j < b; j++) sum += all[j];
+    const v = Math.max(-1, Math.min(1, sum / Math.max(1, b - a)));
+    pcm[i] = v < 0 ? v * 0x8000 : v * 0x7fff;
+  }
+  const buf = new ArrayBuffer(44 + pcm.length * 2); const dv = new DataView(buf);
+  const w = (off, str) => { for (let i = 0; i < str.length; i++) dv.setUint8(off + i, str.charCodeAt(i)); };
+  w(0, 'RIFF'); dv.setUint32(4, 36 + pcm.length * 2, true); w(8, 'WAVE'); w(12, 'fmt ');
+  dv.setUint32(16, 16, true); dv.setUint16(20, 1, true); dv.setUint16(22, 1, true);
+  dv.setUint32(24, TARGET_RATE, true); dv.setUint32(28, TARGET_RATE * 2, true);
+  dv.setUint16(32, 2, true); dv.setUint16(34, 16, true); w(36, 'data'); dv.setUint32(40, pcm.length * 2, true);
+  new Int16Array(buf, 44).set(pcm);
+  return new Uint8Array(buf);
+}
+
+function toBase64(bytes) {
+  let bin = ''; const step = 0x8000;
+  for (let i = 0; i < bytes.length; i += step) bin += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+  return btoa(bin);
 }
 
 export default function (component) {
@@ -122,6 +147,19 @@ async function ensureMic(S) {
   S.analyser.fftSize = 1024;
   src.connect(S.analyser);
   S.buf = new Float32Array(S.analyser.fftSize);
+  // captura do áudio cru (PCM) para gerar WAV
+  S.proc = S.ctx.createScriptProcessor(4096, 1, 1);
+  S.mute = S.ctx.createGain(); S.mute.gain.value = 0;
+  src.connect(S.proc); S.proc.connect(S.mute); S.mute.connect(S.ctx.destination);
+  S.recording = false; S.pcm = [];
+  S.proc.onaudioprocess = (e) => {
+    if (!S.recording) return;
+    S.pcm.push(new Float32Array(e.inputBuffer.getChannelData(0)));
+    if (!S.speechStart) {  // antes de você começar a falar, guarda só um pedacinho (pré-roll)
+      const keep = Math.ceil(PREROLL_SEC * S.ctx.sampleRate / 4096);
+      if (S.pcm.length > keep) S.pcm.splice(0, S.pcm.length - keep);
+    }
+  };
 }
 
 function level(S) {
@@ -134,13 +172,8 @@ function startListening(S) {
   if (S.paused) { setState(S, 'paused'); return; }
   if (!S.stream) return;
   if (S.ctx && S.ctx.state === 'suspended') S.ctx.resume();
-  const mime = pickMime();
-  S.chunks = []; S.discard = false; S.speechStart = null; S.lastVoice = null; S.t0 = performance.now();
-  S.rec = new MediaRecorder(S.stream, mime ? { mimeType: mime } : undefined);
-  S.recMime = S.rec.mimeType || mime || 'audio/webm';
-  S.rec.ondataavailable = (e) => { if (e.data && e.data.size) S.chunks.push(e.data); };
-  S.rec.onstop = () => onStopped(S);
-  S.rec.start(250);
+  S.pcm = []; S.discard = false; S.speechStart = null; S.lastVoice = null; S.t0 = performance.now();
+  S.recording = true;
   setState(S, 'listening');
   try { S.wrap.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch (e) {}
   loop(S);
@@ -163,21 +196,19 @@ function loop(S) {
 function stopRecording(S, discard) {
   S.discard = discard;
   S.spoke = S.speechStart ? (S.lastVoice - S.speechStart) : 0;
-  try { if (S.rec && S.rec.state !== 'inactive') S.rec.stop(); } catch (e) {}
+  if (!S.recording) return;
+  S.recording = false;
+  onStopped(S);
 }
 
 function onStopped(S) {
   if (S.discard) return;
   if (S.spoke < MIN_SPEECH_MS) { startListening(S); return; }  // foi só um barulho
-  const blob = new Blob(S.chunks, { type: S.recMime });
   setState(S, 'thinking');
-  const fr = new FileReader();
-  fr.onloadend = () => {
-    const b64 = String(fr.result).split(',')[1] || '';
-    S.sentToken = S.lastSeenToken;
-    S.send('utterance', { b64: b64, mime: S.recMime.split(';')[0] });
-  };
-  fr.readAsDataURL(blob);
+  const wav = encodeWav(S.pcm, S.ctx.sampleRate);
+  S.pcm = [];
+  S.sentToken = S.lastSeenToken;
+  S.send('utterance', { b64: toBase64(wav), mime: 'audio/wav' });
 }
 
 function playReply(S, r) {

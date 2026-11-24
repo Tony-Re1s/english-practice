@@ -340,12 +340,7 @@ if not ss.started:
 
 
 # --- Conversa -----------------------------------------------------------------
-c1, c2 = st.columns([3, 1.4], vertical_alignment="center")
-with c1:
-    ui.pill(ss.context_label)
-if not ss.summary and c2.button("🏁 Encerrar conversa", width="stretch", type="primary"):
-    finish_session()
-    st.rerun()
+ui.pill(ss.context_label)
 
 last_ai = max((i for i, t in enumerate(ss.turns) if t["role"] == "assistant"), default=-1)
 
@@ -395,22 +390,32 @@ if ss.summary:
         st.rerun()
     st.stop()
 
-# --- Entrada ------------------------------------------------------------------
+# --- Entrada (rodapé fixo: microfone + encerrar + texto, sempre visíveis) -----------
 if ss.last_error:
     st.warning(ss.last_error, icon="⚠️")
-if continuous:
-    audio_b64 = base64.b64encode(ss.audio[0]).decode() if ss.audio else None
-    utter = voice_chat(ss.reply_seq, audio_b64, ss.audio[1] if ss.audio else None, ss.listen_token)
-    if utter and utter.get("b64"):
-        handle_audio(base64.b64decode(utter["b64"]), utter.get("mime") or "audio/webm")
-        st.rerun()
-elif can_listen:
-    rec = st.audio_input("🎙️ Grave sua resposta", key=f"mic_{ss.mic_key}")
-    if rec is not None:
-        handle_audio(rec.getvalue(), "audio/wav")
-        st.rerun()
 
-typed = st.chat_input("Ou digite sua resposta em inglês...")
+utter = rec = None
+with st._bottom:
+    m1, m2 = st.columns([4, 1.3], vertical_alignment="center")
+    with m1:
+        if continuous:
+            audio_b64 = base64.b64encode(ss.audio[0]).decode() if ss.audio else None
+            utter = voice_chat(ss.reply_seq, audio_b64, ss.audio[1] if ss.audio else None, ss.listen_token)
+        elif can_listen:
+            rec = st.audio_input("🎙️ Grave sua resposta", key=f"mic_{ss.mic_key}", label_visibility="collapsed")
+    end_clicked = m2.button("🏁 Encerrar", key="end_bottom", width="stretch",
+                            help="Encerra a conversa, desliga o microfone e mostra o resumo.")
+    typed = st.chat_input("Ou digite sua resposta em inglês...")
+
+if end_clicked:
+    finish_session()
+    st.rerun()
+if utter and utter.get("b64"):
+    handle_audio(base64.b64decode(utter["b64"]), utter.get("mime") or "audio/webm")
+    st.rerun()
+if rec is not None:
+    handle_audio(rec.getvalue(), "audio/wav")
+    st.rerun()
 if typed:
     try:
         handle_user(typed)

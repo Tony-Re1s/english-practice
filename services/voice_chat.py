@@ -7,21 +7,22 @@ O Python só recebe o áudio gravado (trigger 'utterance') e devolve a resposta 
 import streamlit as st
 
 CSS = """
-.vc { display:flex; flex-direction:column; align-items:center; gap:10px; padding:18px 0 6px; font-family: 'Nunito', system-ui, sans-serif; }
-.vc-btn { position:relative; width:112px; height:112px; border-radius:50%; border:none; cursor:pointer;
-  background: radial-gradient(circle at 30% 30%, #A8E6E0, #3FB8AF 70%); color:#fff; font-size:44px;
-  box-shadow: 0 10px 28px rgba(63,184,175,.35); transition: transform .15s ease, background .3s ease; }
-.vc-btn:active { transform: scale(.96); }
-.vc-ring { position:absolute; inset:-10px; border-radius:50%; border:4px solid rgba(129,216,208,.55);
+.vc { display:flex; flex-direction:row; align-items:center; gap:14px; padding:6px 2px; font-family: 'Nunito', system-ui, sans-serif; }
+.vc-btn { position:relative; flex-shrink:0; width:64px; height:64px; border-radius:50%; border:none; cursor:pointer;
+  background: radial-gradient(circle at 30% 30%, #A8E6E0, #3FB8AF 70%); color:#fff; font-size:28px;
+  box-shadow: 0 6px 18px rgba(63,184,175,.35); transition: transform .15s ease, background .3s ease; }
+.vc-btn:active { transform: scale(.95); }
+.vc-ring { position:absolute; inset:-7px; border-radius:50%; border:3px solid rgba(129,216,208,.55);
   transform: scale(var(--lvl,1)); transition: transform .08s linear; pointer-events:none; }
-.vc[data-state=listening] .vc-ring { border-color: rgba(63,184,175,.8); }
+.vc[data-state=listening] .vc-ring { border-color: rgba(63,184,175,.85); }
 .vc[data-state=thinking] .vc-btn { background: radial-gradient(circle at 30% 30%, #FFF3B8, #F4D35E 75%); }
 .vc[data-state=thinking] .vc-ring { animation: vc-spin 1.1s linear infinite; border-style: dashed; }
 .vc[data-state=speaking] .vc-btn { background: radial-gradient(circle at 30% 30%, #D9EEFC, #8CC8F0 75%); }
 .vc[data-state=speaking] .vc-ring { animation: vc-pulse 1.2s ease-in-out infinite; border-color: rgba(140,200,240,.7); }
 .vc[data-state=paused] .vc-btn, .vc[data-state=idle] .vc-btn { background: radial-gradient(circle at 30% 30%, #E8F7F5, #9ED9D3 80%); }
-.vc-status { font-size:15px; font-weight:700; color:#21414A; text-align:center; }
-.vc-hint { font-size:13px; color:#5D7A82; text-align:center; max-width:320px; }
+.vc-text { display:flex; flex-direction:column; gap:2px; min-width:0; }
+.vc-status { font-size:15px; font-weight:800; color:#21414A; }
+.vc-hint { font-size:12.5px; color:#5D7A82; line-height:1.3; }
 @keyframes vc-pulse { 0%,100% { transform: scale(1); opacity:.9 } 50% { transform: scale(1.12); opacity:.5 } }
 @keyframes vc-spin { to { transform: rotate(360deg) } }
 """
@@ -29,11 +30,11 @@ CSS = """
 JS = r"""
 const SILENCE_MS = 1300, MIN_SPEECH_MS = 350, MAX_UTTER_MS = 60000;
 const LABELS = {
-  idle:      ['🎙️', 'Toque para começar a conversa', 'O microfone fica ligado e para sozinho quando você termina de falar.'],
+  idle:      ['🎙️', 'Toque para começar', 'Ouço sozinho e paro quando você termina de falar.'],
   listening: ['🎙️', 'Ouvindo… pode falar', 'Toque no botão para pausar.'],
   thinking:  ['💭', 'Pensando…', ''],
   speaking:  ['🔊', 'Respondendo…', 'Depois da resposta eu volto a ouvir.'],
-  paused:    ['⏸️', 'Pausado', 'Toque para continuar. Use a pausa para pensar na frase.'],
+  paused:    ['⏸️', 'Pausado', 'Toque para continuar.'],
   error:     ['⚠️', 'Não consegui usar o microfone', 'Permita o microfone no navegador e toque de novo.'],
 };
 
@@ -80,7 +81,7 @@ export default function (component) {
     const wrap = document.createElement('div');
     wrap.className = 'vc';
     wrap.innerHTML = '<button class="vc-btn" type="button"><span class="vc-ring"></span><span class="vc-ico"></span></button>' +
-                     '<div class="vc-status"></div><div class="vc-hint"></div>';
+                     '<div class="vc-text"><div class="vc-status"></div><div class="vc-hint"></div></div>';
     root.appendChild(wrap);
     S.wrap = wrap; S.btn = wrap.querySelector('.vc-btn');
     S.ico = wrap.querySelector('.vc-ico'); S.status = wrap.querySelector('.vc-status'); S.hint = wrap.querySelector('.vc-hint');
@@ -179,7 +180,7 @@ function startListening(S) {
   S.pcm = []; S.discard = false; S.speechStart = null; S.lastVoice = null; S.t0 = performance.now();
   S.recording = true;
   setState(S, 'listening');
-  try { S.wrap.scrollIntoView({ behavior: 'smooth', block: 'end' }); } catch (e) {}
+  
   loop(S);
 }
 

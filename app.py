@@ -11,23 +11,29 @@ from services import llm, voice
 st.set_page_config(page_title="English Practice", page_icon="🗣️", layout="centered")
 
 
-# --- Acesso -------------------------------------------------------------------
-def check_password() -> bool:
-    """Protege o app (e suas chaves de API) quando ele estiver publicado."""
-    expected = st.secrets.get("APP_PASSWORD", "")
-    if not expected or st.session_state.get("authed"):
+# --- Acesso (login com Google) ------------------------------------------------
+def check_login() -> bool:
+    """Só deixa entrar quem fizer login com Google e estiver em ALLOWED_EMAILS.
+
+    Sem a seção [auth] nos Secrets (ex.: rodando local), o app abre sem login.
+    """
+    if "auth" not in st.secrets:
         return True
-    st.title("🗣️ English Practice")
-    pwd = st.text_input("Senha", type="password")
-    if pwd:
-        if pwd == expected:
-            st.session_state.authed = True
-            st.rerun()
-        st.error("Senha incorreta.")
-    return False
+    if not st.user.is_logged_in:
+        st.title("🗣️ English Practice")
+        st.write("Entre com sua conta Google para praticar.")
+        st.button("Entrar com Google", on_click=st.login, type="primary")
+        return False
+    allowed = [e.strip().lower() for e in st.secrets.get("ALLOWED_EMAILS", [])]
+    if allowed and str(st.user.get("email", "")).lower() not in allowed:
+        st.title("🗣️ English Practice")
+        st.error(f"A conta {st.user.get('email')} não tem acesso a este app.")
+        st.button("Sair", on_click=st.logout)
+        return False
+    return True
 
 
-if not check_password():
+if not check_login():
     st.stop()
 
 
@@ -146,6 +152,10 @@ with st.sidebar:
         st.caption(f"Falas suas: {user_turns} · Correções: {len(ss.corrections)}")
     if not voice.has_openai():
         st.info("Sem OPENAI_API_KEY: microfone desligado e voz básica (gTTS).", icon="🎙️")
+    if "auth" in st.secrets and st.user.is_logged_in:
+        st.divider()
+        st.caption(f"Conectado como {st.user.get('email', '')}")
+        st.button("Sair", on_click=st.logout, use_container_width=True)
 
 
 # --- Conversa -----------------------------------------------------------------

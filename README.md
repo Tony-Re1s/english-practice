@@ -24,7 +24,7 @@ services/voice.py    # OpenAI Whisper (ouvir) + TTS (falar); gTTS como reserva
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Conversa e correções (console.anthropic.com) | Sim |
 | `OPENAI_API_KEY` | Microfone e voz natural (platform.openai.com) | Não: sem ela, só texto digitado + voz gTTS |
-| `APP_PASSWORD` | Senha do app publicado, para ninguém usar suas chaves | Recomendado |
+| `[auth]` + `ALLOWED_EMAILS` | Login com Google; só os e-mails da lista entram | Recomendado |
 
 As duas APIs cobram por uso. Configure um limite de gasto mensal em cada painel.
 
@@ -33,6 +33,12 @@ As duas APIs cobram por uso. Configure um limite de gasto mensal em cada painel.
 2. Em **share.streamlit.io** → *Create app* → escolha o repositório, branch `main`, arquivo `app.py`.
 3. Em *Advanced settings → Secrets*, cole o conteúdo de `.streamlit/secrets.toml.example` com suas chaves reais.
 4. *Deploy*. No celular, abra o link e permita o microfone.
+
+## Login com Google
+1. Google Cloud Console → *APIs & Services → Credentials → Create credentials → OAuth client ID* → tipo **Web application**.
+2. Em *Authorized redirect URIs*, coloque `https://tony-english-practice.streamlit.app/oauth2callback`.
+3. Copie o *Client ID* e o *Client secret* para a seção `[auth]` dos Secrets, junto com um `cookie_secret` aleatório.
+4. Em `ALLOWED_EMAILS`, liste os e-mails que podem entrar.
 
 ## Ajustes rápidos (config.py)
 - Mais qualidade na conversa: `CHAT_MODEL = "claude-sonnet-5-5"`.

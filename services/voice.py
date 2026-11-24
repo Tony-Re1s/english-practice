@@ -95,18 +95,23 @@ def _fname(mime: str) -> str:
     return "speech." + EXT.get(mime, "webm")
 
 
-def _stt_groq(audio: bytes, mime: str) -> str:
+def _lang_kw(language):
+    return {"language": language} if language else {}
+
+
+def _stt_groq(audio: bytes, mime: str, language="en") -> str:
     r = _groq().audio.transcriptions.create(
-        model=GROQ_STT_MODEL, file=(_fname(mime), audio), language="en")
+        model=GROQ_STT_MODEL, file=(_fname(mime), audio), **_lang_kw(language))
     return r.text
 
 
-def _stt_gemini(audio: bytes, mime: str) -> str:
+def _stt_gemini(audio: bytes, mime: str, language="en") -> str:
     from google.genai import types
     r = _gemini().models.generate_content(
         model=GEMINI_STT_MODEL,
         contents=[
-            "Transcribe this English speech exactly as spoken. "
+            ("Transcribe this English speech exactly as spoken. " if language == "en" else
+             "Transcribe this speech exactly as spoken, in its original language (English or Portuguese). ") +
             "Return only the transcript, without comments. Keep the speaker's mistakes.",
             types.Part.from_bytes(data=audio, mime_type=mime),
         ],
@@ -114,9 +119,9 @@ def _stt_gemini(audio: bytes, mime: str) -> str:
     return r.text or ""
 
 
-def _stt_openai(audio: bytes, mime: str) -> str:
+def _stt_openai(audio: bytes, mime: str, language="en") -> str:
     r = _openai().audio.transcriptions.create(
-        model=OPENAI_STT_MODEL, file=(_fname(mime), audio), language="en")
+        model=OPENAI_STT_MODEL, file=(_fname(mime), audio), **_lang_kw(language))
     return r.text
 
 
@@ -131,7 +136,7 @@ def _noop(**_):
     pass
 
 
-def transcribe(audio: bytes, mime: str = "audio/wav", log=_noop) -> tuple[str, str]:
+def transcribe(audio: bytes, mime: str = "audio/wav", log=_noop, language: str | None = "en") -> tuple[str, str]:
     """Retorna (texto, provedor_usado). Chama log(...) para cada tentativa, inclusive as que falharem."""
     errors = []
     secs = audio_seconds(audio)
@@ -140,7 +145,7 @@ def transcribe(audio: bytes, mime: str = "audio/wav", log=_noop) -> tuple[str, s
             continue
         t0 = time.time()
         try:
-            text = (fn(audio, mime) or "").strip()
+            text = (fn(audio, mime, language) or "").strip()
             if text:
                 log(step="ouvir", provider=name, model=model, ok=True, audio_seconds=secs,
                     latency_ms=int((time.time() - t0) * 1000))

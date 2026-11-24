@@ -12,7 +12,8 @@ from config import (DEFAULT_LEVEL, LEVELS, LIVE_MAX_SESSION_MIN, LIVE_MODEL, LIV
                     MAX_HISTORY_TURNS, PROVIDER_LABEL, PROVIDERS)
 from prompts import (FREE_TALK_OPEN, FREE_TALK_ROLE, LIVE_SYSTEM, SCENARIOS, START_MESSAGE, TOPIC_ROLE,
                      TUTOR_SYSTEM)
-from services import db, live, llm, users, voice
+from services import db, learn, live, llm, users, voice
+from syllabus import topic_for
 from services.voice_chat import voice_chat
 
 st.set_page_config(page_title="English Practice", page_icon="static/favicon.png", layout="centered",
@@ -257,7 +258,7 @@ def handle_live_end(res: dict) -> None:
 
 
 # --- Navegação (rodapé) ---------------------------------------------------------
-NAV = {"inicio": "💬 Conversar", "historico": "📊 Histórico", "ajustes": "⚙️ Ajustes"}
+NAV = {"inicio": "💬 Falar", "aprender": "📚 Aprender", "historico": "📊 Histórico", "ajustes": "⚙️ Ajustes"}
 if prof.is_admin:
     NAV["usuarios"] = "👥 Usuários"
 
@@ -305,6 +306,8 @@ def history_view() -> None:
     st.caption("Custos estimados pela tabela de preços do app. Valores oficiais: platform.claude.com e "
                "platform.openai.com/usage. O Gemini ao vivo roda no plano grátis.")
 
+    learning_history(who)
+
     st.markdown("### 🗂️ Conversas anteriores")
     sess = db.sessions_recent(who)
     if not sess:
@@ -326,6 +329,25 @@ def history_view() -> None:
     if chosen.get("summary"):
         with st.expander("📋 Resumo dessa conversa", expanded=True):
             st.markdown(chosen["summary"])
+
+
+def learning_history(who: str) -> None:
+    import pandas as pd
+
+    st.markdown("### 📚 Trilhas concluídas")
+    ex = db.exercise_history(who)
+    vd = db.video_history(who)
+    c1, c2 = st.columns(2)
+    c1.metric("Exercícios de gramática", len(ex))
+    c2.metric("Vídeos", len(vd))
+    if ex:
+        st.markdown("**📝 Gramática**")
+        st.dataframe(pd.DataFrame(ex), hide_index=True, width="stretch")
+    if vd:
+        st.markdown("**🎬 Vídeos**")
+        st.dataframe(pd.DataFrame(vd), hide_index=True, width="stretch")
+    if not ex and not vd:
+        st.caption("Nenhum exercício ou vídeo concluído ainda.")
 
 
 # --- Tela: ajustes ---------------------------------------------------------------
@@ -434,9 +456,242 @@ def users_view() -> None:
         st.success("Salvo.")
 
 
+# --- Tela: aprender (gramática, vídeos, tradutor) ----------------------------------------
+def learn_level() -> str:
+    if prof.level_locked:
+        st.caption(f"Nível: {LEVELS[ss.level]['label']}")
+        return ss.level
+    return st.selectbox("Nível da trilha", list(LEVELS), index=list(LEVELS).index(ss.level),
+                        format_func=lambda k: LEVELS[k]["label"], key="learn_level")
+
+
+def grammar_tab(lvl: str) -> None:
+    done = db.exercises_done_map(email, lvl) if db.enabled() else {}
+    st.session_state.setdefault("ex_blocks", 5)  # 5 blocos de 10 = 50 exercícios visíveis; dá para ir aumentando
+    n_total = ss.ex_blocks * 10
+    st.caption(f"Concluídos neste nível: **{len(done)}** de {n_total}. O exercício nº é sempre o mesmo para todo mundo "
+               "do mesmo nível — dá para combinar \"hoje do 1 ao 3\".")
+    blocks = [f"{i * 10 + 1}–{i * 10 + 10}" for i in range(ss.ex_blocks)]
+    blk = st.segmented_control("Bloco", blocks, default=blocks[0], key=f"blk_{lvl}") or blocks[0]
+    start = int(blk.split("–")[0])
+    nums = list(range(start, start + 10))
+    num = st.pills("Exercício", nums, default=nums[0], key=f"exn_{lvl}_{start}",
+                   format_func=lambda n: f"✅ {n}" if n in done else str(n)) or nums[0]
+    if st.button("➕ Mostrar mais 10 exercícios", key="more_ex"):
+        ss.ex_blocks += 1
+        st.rerun()
+
+    topic, rnd = topic_for(lvl, num)
+    st.markdown(f"#### {num}. {topic}" + (f" · revisão {rnd}" if rnd > 1 else ""))
+    cache = st.session_state.setdefault("ex_cache", {})
+    key = f"{lvl}:{num}"
+    ex = cache.get(key) or ((db.get_exercise(lvl, num) or {}).get("content") if db.enabled() else None)
+    if isinstance(ex, str):
+        ex = json.loads(ex)
+    if not ex:
+        if st.button("✨ Abrir exercício", type="primary", key=f"open_{key}", width="stretch"):
+            with st.spinner("Preparando o exercício (só na primeira vez)..."):
+                try:
+                    lv = LEVELS[lvl]
+                    ex, u = learn.make_exercise(lv["guide"], lv["cefr"], topic, rnd, prof.keys.get("anthropic"))
+                    log(step="exercício", provider="Anthropic", model=u["model"], ok=True,
+                        input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
+                    db.save_exercise(lvl, num, topic, ex)
+                    cache[key] = ex
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"Não consegui criar o exercício: {e}")
+        return
+    cache[key] = ex
+    if num in done:
+        sc, tt = done[num]
+        st.success(f"Você já concluiu este exercício (melhor nota: {sc}/{tt}). Pode refazer quando quiser.", icon="✅")
+    with st.container(border=True):
+        st.markdown(f"**{ex.get('title', '')}**")
+        st.markdown(ex.get("explanation_pt", ""))
+        for e in ex.get("examples", []):
+            st.markdown(f"- *{e}*")
+    qs = ex.get("questions", [])
+    with st.form(f"form_{key}"):
+        answers = {}
+        for i, q in enumerate(qs):
+            if q.get("type") == "mc" and q.get("options"):
+                answers[i] = st.radio(f"{i + 1}. {q['prompt']}", q["options"], index=None, key=f"q_{key}_{i}")
+            else:
+                answers[i] = st.text_input(f"{i + 1}. {q['prompt']}", key=f"q_{key}_{i}")
+        sent = st.form_submit_button("✅ Corrigir", type="primary", width="stretch")
+    if sent:
+        score = 0
+        for i, q in enumerate(qs):
+            ok = learn.check_answer(q, answers.get(i))
+            score += ok
+            if ok:
+                st.markdown(f"✅ **{i + 1}.** Certo! {q.get('explain_pt', '')}")
+            else:
+                st.markdown(f"❌ **{i + 1}.** Resposta: **{q['answer']}** — {q.get('explain_pt', '')}")
+        st.markdown(f"### Nota: {score}/{len(qs)}")
+        db.exercise_done(email, lvl, num, score, len(qs), {str(k): v for k, v in answers.items()})
+        if score == len(qs):
+            st.balloons()
+
+
+def videos_tab(lvl: str) -> None:
+    if not db.enabled():
+        st.info("A trilha de vídeos precisa do banco ligado.", icon="🗄️")
+        return
+    if prof.is_admin:
+        with st.expander("➕ Adicionar vídeo do YouTube"):
+            with st.form("add_video", clear_on_submit=True):
+                url = st.text_input("Link do YouTube (público)")
+                title = st.text_input("Título (opcional — o Gemini preenche ao ler o vídeo)")
+                vlev = st.selectbox("Nível", list(LEVELS), index=list(LEVELS).index(lvl),
+                                    format_func=lambda k: LEVELS[k]["label"])
+                if st.form_submit_button("Adicionar", width="stretch"):
+                    vid = learn.youtube_id(url)
+                    if not vid:
+                        st.error("Não reconheci esse link do YouTube.")
+                    else:
+                        db.add_video(vlev, title or f"Vídeo {vid}", f"https://www.youtube.com/watch?v={vid}", vid, email)
+                        st.success("Vídeo adicionado.")
+    vids = db.list_videos(lvl)
+    if not vids:
+        st.caption("Ainda não há vídeos neste nível." + (" Adicione pelo botão acima." if prof.is_admin else
+                                                          " Peça ao administrador para adicionar."))
+        return
+    done = db.videos_done_map(email)
+    label = {v["id"]: f"{'✅ ' if v['id'] in done else ''}{i + 1}. {v['title']}" for i, v in enumerate(vids)}
+    vid_id = st.selectbox("Vídeo", list(label), format_func=lambda k: label[k], key=f"vsel_{lvl}")
+    v = next(x for x in vids if x["id"] == vid_id)
+    st.video(v["url"])
+    st.link_button("▶️ Não tocou aqui? Abrir no YouTube", v["url"], width="stretch")
+    notes = v.get("notes")
+    notes_json = json.dumps(notes, ensure_ascii=False) if isinstance(notes, (dict, list)) else (notes or "")
+    if not notes_json:
+        gem = prof.keys.get("gemini") or users.owner_key("gemini")
+        if st.button("📖 Preparar perguntas (o Gemini assiste o vídeo uma única vez)", type="primary", width="stretch"):
+            with st.spinner("O Gemini está assistindo o vídeo..."):
+                try:
+                    notes_json, _ = learn.video_summary(v["url"], gem)
+                    log(step="vídeo", provider="Gemini", model=learn.GEMINI_STT_MODEL, ok=True)
+                    db.set_video_notes(v["id"], notes_json, json.loads(notes_json).get("title"))
+                    st.rerun()
+                except Exception as e:
+                    log(step="vídeo", provider="Gemini", model=learn.GEMINI_STT_MODEL, ok=False, error=str(e)[:500])
+                    st.error(f"Não consegui ler o vídeo: {e}")
+        return
+    info = json.loads(notes_json)
+    if info.get("vocab"):
+        with st.expander("📒 Vocabulário do vídeo"):
+            for w in info["vocab"]:
+                st.markdown(f"- **{w.get('en', '')}** — {w.get('pt', '')}")
+    qkey = f"vq_{v['id']}"
+    if qkey not in ss or st.button("🔄 Novas perguntas", key=f"newq_{v['id']}"):
+        with st.spinner("Preparando perguntas..."):
+            try:
+                prev = ss.get(qkey) or []
+                qs, u = learn.video_questions(notes_json, LEVELS[lvl]["cefr"], prof.keys.get("anthropic"), prev)
+                log(step="vídeo perguntas", provider="Anthropic", model=u["model"], ok=True,
+                    input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
+                ss[qkey] = qs
+            except Exception as e:
+                st.error(f"Não consegui criar as perguntas: {e}")
+                return
+    qs = ss[qkey]
+    with st.form(f"vform_{v['id']}_{abs(hash(tuple(qs)))}"):
+        ans = [st.text_area(f"{i + 1}. {q}", height=68, key=f"va_{v['id']}_{i}_{abs(hash(q))}") for i, q in enumerate(qs)]
+        sent = st.form_submit_button("✅ Enviar respostas", type="primary", width="stretch")
+    if sent:
+        with st.spinner("Corrigindo..."):
+            try:
+                res, u = learn.grade_answers(notes_json, qs, ans, LEVELS[lvl]["cefr"], prof.keys.get("anthropic"))
+                log(step="vídeo correção", provider="Anthropic", model=u["model"], ok=True,
+                    input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
+            except Exception as e:
+                st.error(f"Não consegui corrigir: {e}")
+                return
+        results = res.get("results", [])
+        score = sum(1 for r in results if r.get("correct"))
+        for i, r in enumerate(results):
+            st.markdown(f"{'✅' if r.get('correct') else '❌'} **{i + 1}.** {r.get('comment_pt', '')}  \n"
+                        f"<span style='color:#5D7A82'>Exemplo: <i>{r.get('better', '')}</i></span>",
+                        unsafe_allow_html=True)
+        st.markdown(f"### Nota: {score}/{len(qs)}")
+        st.info(res.get("overall_pt", ""), icon="💬")
+        db.video_done(email, v["id"], score, len(qs), {"q": qs, "a": ans})
+    if st.button("💬 Conversar sobre este vídeo", width="stretch"):
+        role = ("You and the learner just watched this video together. Talk about it: ask what they understood, "
+                "their opinion, and use the video's key expressions. VIDEO NOTES: " + notes_json[:3000])
+        ss.view = "inicio"
+        try:
+            start_session(role, f"🎬 {v['title']}")
+            st.rerun()
+        except Exception as e:
+            st.error(f"Erro ao iniciar: {e}")
+
+
+def translator_tab() -> None:
+    st.caption("Digite ou fale uma palavra ou frase, em inglês ou português.")
+    text = st.text_input("O que você quer traduzir?", key="tr_text", placeholder="ex.: 'cash flow' ou 'fazer hora extra'")
+    rec = st.audio_input("…ou fale", key=f"tr_mic_{st.session_state.get('tr_mic', 0)}") if voice.can_listen() else None
+    go = st.button("🔤 Traduzir", type="primary", width="stretch")
+    if rec is not None:
+        try:
+            with st.spinner("Ouvindo..."):
+                text, _ = voice.transcribe(rec.getvalue(), "audio/wav", log=log, language=None)
+            st.session_state["tr_mic"] = st.session_state.get("tr_mic", 0) + 1
+            go = True
+        except Exception as e:
+            st.error(f"Não entendi o áudio: {e}")
+    if go and text.strip():
+        with st.spinner("Traduzindo..."):
+            try:
+                ss.tr_result, u = learn.translate(text, prof.keys.get("anthropic"))
+                ss.tr_result["_input"] = text
+                log(step="tradutor", provider="Anthropic", model=u["model"], ok=True,
+                    input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
+                ss.tr_audio = None
+            except Exception as e:
+                st.error(f"Não consegui traduzir: {e}")
+    r = ss.get("tr_result")
+    if not r:
+        return
+    with st.container(border=True):
+        arrow = "🇺🇸 → 🇧🇷" if r.get("source_lang") == "en" else "🇧🇷 → 🇺🇸"
+        st.caption(f"{arrow} “{r.get('_input', '')}”")
+        st.markdown(f"### {r.get('translation', '')}")
+        st.markdown(r.get("meaning_pt", ""))
+        if r.get("alternatives"):
+            st.markdown("**Outras formas:** " + " · ".join(r["alternatives"]))
+        for e in r.get("examples", []):
+            st.markdown(f"- *{e.get('en', '')}* — {e.get('pt', '')}")
+        if r.get("tip_pt"):
+            st.info(r["tip_pt"], icon="💡")
+    if st.button("🔊 Ouvir em inglês", width="stretch"):
+        try:
+            data, mime, _ = voice.speak(r.get("english") or r.get("translation", ""), pace="calm", log=log)
+            ss.tr_audio = (data, mime)
+        except Exception as e:
+            st.error(f"Não consegui gerar o áudio: {e}")
+    if ss.get("tr_audio"):
+        st.audio(ss.tr_audio[0], format=ss.tr_audio[1], autoplay=True)
+
+
+def learn_view() -> None:
+    ui.hero("📚 Aprender", "Trilhas separadas da conversa: gramática por nível, vídeos para treinar a escuta e um tradutor.")
+    lvl = learn_level()
+    t1, t2, t3 = st.tabs(["📝 Gramática", "🎬 Vídeos", "🔤 Tradutor"])
+    with t1:
+        grammar_tab(lvl)
+    with t2:
+        videos_tab(lvl)
+    with t3:
+        translator_tab()
+
+
 # --- Roteamento das telas sem conversa ativa -----------------------------------------------
 if not ss.started and ss.view != "inicio":
-    {"historico": history_view, "ajustes": settings_view, "usuarios": users_view}.get(ss.view, history_view)()
+    {"historico": history_view, "ajustes": settings_view, "usuarios": users_view,
+     "aprender": learn_view}.get(ss.view, history_view)()
     bottom_nav()
     st.stop()
 

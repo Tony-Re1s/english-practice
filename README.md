@@ -7,6 +7,10 @@ Parceira de conversação em inglês (nível B1) com voz, correções curtas a c
 - **Correção falada**: quando você erra, ela confirma o que você quis dizer ("Do you mean: …?") e segue a conversa.
 - **3 modos**: 🎧 mãos livres, 👆 apertar para falar e ⚡ ao vivo (Gemini Live grátis, com limite de minutos por dia; nunca usa a OpenAI).
 - **👥 Usuários** (admin): liberar e-mails, travar o nível, limite de falas por dia, minutos ao vivo e, serviço por serviço, usar a chave do dono, uma chave própria (criptografada) ou desligar.
+- **📚 Aprender** (separado da conversa):
+  - **Gramática por nível**: trilha numerada seguindo a progressão do Quadro Europeu (A1→B2); cada exercício é criado pelo Claude na primeira vez e fica salvo, então o nº 5 é sempre o mesmo para o mesmo nível. Correção automática e registro do que cada pessoa concluiu.
+  - **Vídeos** (ouvir e interpretar): o admin cola links públicos do YouTube por nível; o Gemini assiste cada vídeo uma única vez (plano grátis) e o resumo fica salvo; o Claude faz perguntas novas a cada vez, corrige e dá para conversar sobre o vídeo.
+  - **Tradutor** EN↔PT por texto ou voz, com exemplos e pronúncia.
 - **Cara de app**: navegação no rodapé, logo e ícone para a tela de início do iPhone/Mac.
 - **5 cenários**: Dia a dia, Trabalho, Intercâmbio/viagem, 🧠 Assuntos (mercado financeiro, câmbio, tesouraria, tecnologia...) e Conversa livre.
 - **📊 Uso e histórico**: cada IA usada (conversa, ouvir, falar), falhas e trocas de serviço, custo estimado, alerta se a OpenAI foi usada, e todas as conversas antigas com correções e resumo (precisa `DATABASE_URL`).

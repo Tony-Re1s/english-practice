@@ -30,6 +30,18 @@ SCHEMA = [
         level text, level_locked boolean default false, daily_turns int, live_enabled boolean default false,
         live_daily_minutes int, key_policy jsonb default '{}'::jsonb, keys_enc jsonb default '{}'::jsonb,
         created_at timestamptz default now(), updated_at timestamptz default now())""",
+    """create table if not exists ep_exercises (
+        level text, num int, topic text, content jsonb, created_at timestamptz default now(),
+        primary key (level, num))""",
+    """create table if not exists ep_exercise_done (
+        id bigserial primary key, user_email text, level text, num int, score int, total int,
+        answers jsonb, ts timestamptz default now())""",
+    """create table if not exists ep_videos (
+        id bigserial primary key, level text, title text, url text, youtube_id text unique,
+        notes jsonb, added_by text, created_at timestamptz default now())""",
+    """create table if not exists ep_video_done (
+        id bigserial primary key, user_email text, video_id bigint references ep_videos(id) on delete cascade,
+        score int, total int, answers jsonb, ts timestamptz default now())""",
 ]
 
 _lock = threading.Lock()
@@ -227,3 +239,72 @@ def live_blocked_since_reset(reset_hour_brt: int) -> bool:
 def known_users() -> list[str]:
     rows = _run("select distinct user_email from ep_sessions where user_email is not null order by 1", fetch=True)
     return [r["user_email"] for r in rows]
+
+
+# --- trilha de gramática --------------------------------------------------------------
+def get_exercise(level: str, num: int) -> dict | None:
+    rows = _run("select topic, content from ep_exercises where level = %s and num = %s", (level, num), fetch=True)
+    return rows[0] if rows else None
+
+
+def save_exercise(level: str, num: int, topic: str, content: dict) -> None:
+    _run("insert into ep_exercises (level, num, topic, content) values (%s,%s,%s,%s) "
+         "on conflict (level, num) do nothing", (level, num, topic, json.dumps(content, ensure_ascii=False)))
+
+
+def exercise_done(user_email: str, level: str, num: int, score: int, total: int, answers: dict) -> None:
+    _run("insert into ep_exercise_done (user_email, level, num, score, total, answers) values (%s,%s,%s,%s,%s,%s)",
+         (user_email, level, num, score, total, json.dumps(answers, ensure_ascii=False)))
+
+
+def exercises_done_map(user_email: str, level: str) -> dict:
+    """num -> melhor nota (score, total)."""
+    rows = _run("""select num, max(score) as score, max(total) as total from ep_exercise_done
+                   where user_email = %s and level = %s group by num""", (user_email, level), fetch=True)
+    return {r["num"]: (r["score"], r["total"]) for r in rows}
+
+
+def exercise_history(user_email: str, limit: int = 100) -> list[dict]:
+    return _run("""select to_char(d.ts at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') as quando, d.level as nivel,
+                          d.num as exercicio, e.topic as tema, d.score || '/' || d.total as nota
+                   from ep_exercise_done d left join ep_exercises e on e.level = d.level and e.num = d.num
+                   where d.user_email = %s order by d.ts desc limit %s""", (user_email, limit), fetch=True)
+
+
+# --- trilha de vídeos -------------------------------------------------------------------
+def add_video(level: str, title: str, url: str, youtube_id: str, added_by: str) -> None:
+    _run("""insert into ep_videos (level, title, url, youtube_id, added_by) values (%s,%s,%s,%s,%s)
+            on conflict (youtube_id) do update set level = excluded.level, title = excluded.title""",
+         (level, title, url, youtube_id, added_by))
+
+
+def list_videos(level: str | None = None) -> list[dict]:
+    if level:
+        return _run("select * from ep_videos where level = %s order by id", (level,), fetch=True)
+    return _run("select * from ep_videos order by level, id", fetch=True)
+
+
+def set_video_notes(video_id: int, notes: str, title: str | None = None) -> None:
+    _run("update ep_videos set notes = %s::jsonb, title = coalesce(%s, title) where id = %s", (notes, title, video_id))
+
+
+def delete_video(video_id: int) -> None:
+    _run("delete from ep_videos where id = %s", (video_id,))
+
+
+def video_done(user_email: str, video_id: int, score: int, total: int, answers: dict) -> None:
+    _run("insert into ep_video_done (user_email, video_id, score, total, answers) values (%s,%s,%s,%s,%s)",
+         (user_email, video_id, score, total, json.dumps(answers, ensure_ascii=False)))
+
+
+def videos_done_map(user_email: str) -> dict:
+    rows = _run("""select video_id, max(score) as score, max(total) as total from ep_video_done
+                   where user_email = %s group by video_id""", (user_email,), fetch=True)
+    return {r["video_id"]: (r["score"], r["total"]) for r in rows}
+
+
+def video_history(user_email: str, limit: int = 100) -> list[dict]:
+    return _run("""select to_char(d.ts at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') as quando, v.level as nivel,
+                          v.title as video, d.score || '/' || d.total as nota
+                   from ep_video_done d join ep_videos v on v.id = d.video_id
+                   where d.user_email = %s order by d.ts desc limit %s""", (user_email, limit), fetch=True)

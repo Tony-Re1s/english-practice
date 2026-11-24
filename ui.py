@@ -113,6 +113,7 @@ export default function () {
   const L = window.location, k = L.pathname.indexOf('/~/+/');
   const B = L.origin + (k >= 0 ? L.pathname.slice(0, k) + '/~/+/' : '/');
   const I = B + 'app/static/apple-touch-icon.png', F = B + 'app/static/favicon.png', T = 'English';
+  const M = B + 'app/static/manifest.json';
   function fix(d) {
     const h = d.head; if (!h) return;
     const link = (rel) => { let l = h.querySelector('link[rel="' + rel + '"]');
@@ -124,7 +125,10 @@ export default function () {
     h.querySelectorAll('link[rel="apple-touch-icon"],link[rel="apple-touch-icon-precomposed"]').forEach(l => {
       if (l.href !== I) l.href = I; if (l.getAttribute('sizes') !== '180x180') l.setAttribute('sizes', '180x180'); });
     if (!h.querySelector('link[rel="apple-touch-icon"]')) { const a = link('apple-touch-icon'); a.href = I; a.setAttribute('sizes', '180x180'); }
-    h.querySelectorAll('link[rel="manifest"],link[rel="mask-icon"]').forEach(l => l.remove());  // manifesto do Streamlit = coroa
+    // troca o manifesto do Streamlit (coroa) pelo nosso, que aponta para o nosso logo
+    h.querySelectorAll('link[rel="mask-icon"]').forEach(l => l.remove());
+    h.querySelectorAll('link[rel="manifest"]').forEach(l => { if (l.href !== M) l.remove(); });
+    if (!h.querySelector('link[rel="manifest"]')) { const m = link('manifest'); m.href = M; }
     meta('apple-mobile-web-app-title', T); meta('application-name', T); meta('theme-color', '#3FB8AF');
     meta('apple-mobile-web-app-capable', 'yes'); meta('mobile-web-app-capable', 'yes');
     meta('apple-mobile-web-app-status-bar-style', 'default');

@@ -35,17 +35,16 @@ def current_email() -> str | None:
 
 email = current_email()
 if email is None:
-    ui.brand()
-    ui.hero("🗣️ English Practice", "Sua parceira de conversação em inglês. Entre com sua conta Google para praticar.")
-    st.button("Entrar com Google", on_click=st.login, type="primary", width="stretch")
+    ui.login_screen("English Practice", "Sua parceira de conversação em inglês, do seu jeito e no seu nível.")
+    st.button("Entrar com o Google", on_click=st.login, width="stretch", key="login_btn")
+    st.markdown('<div class="lg-foot">Acesso só para contas liberadas pelo administrador.</div>', unsafe_allow_html=True)
     st.stop()
 
 prof = users.load_profile(email)
 if not prof.allowed:
-    ui.brand()
-    ui.hero("🔒 Acesso restrito", "Esta conta ainda não foi liberada.")
-    st.info(f"Peça ao administrador para liberar **{email}** no painel de usuários.")
-    st.button("Sair", on_click=st.logout)
+    ui.login_screen("Acesso restrito", f"A conta {email} ainda não foi liberada. Peça ao administrador para "
+                    "liberar seu e-mail.", restricted=True)
+    st.button("Entrar com outra conta", on_click=st.logout, width="stretch", key="login_btn")
     st.stop()
 
 voice.set_keys(prof.keys)  # chaves desta pessoa: a do dono, a própria ou desligada, serviço por serviço

@@ -370,3 +370,37 @@ def summary_pdf(title: str, summary: str, transcript: str) -> bytes:
     for line in _latin(transcript).splitlines():
         pdf.multi_cell(0, 5.5, line)
     return bytes(pdf.output())
+
+
+# --- Tela de login (tema Londres) ------------------------------------------------------------
+_G_SVG = ("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 48 48'>"
+          "<path fill='%23FFC107' d='M43.6 20.5H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.4-.4-3.5z'/>"
+          "<path fill='%23FF3D00' d='M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z'/>"
+          "<path fill='%234CAF50' d='M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z'/>"
+          "<path fill='%231976D2' d='M43.6 20.5H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.4-.4-3.5z'/></svg>")
+
+
+def login_screen(title: str, subtitle: str, restricted: bool = False) -> None:
+    apply_theme("london")
+    feats = "" if restricted else """
+      <div class="lg-feats"><span>🎙️ Conversa por voz</span><span>📚 Trilhas por nível</span>
+      <span>🎬 Vídeos com perguntas</span><span>🚀 Modo infantil</span></div>"""
+    st.markdown(f"""<style>
+.lg {{ text-align:center; padding:28px 6px 10px; animation: ep-in .6s ease-out; }}
+.lg img {{ width:88px; height:88px; border-radius:24px; box-shadow:0 12px 34px rgba(0,0,0,.45); }}
+.lg h1 {{ font-family:'Cormorant Garamond', Georgia, serif !important; font-size:2.6rem !important; margin:14px 0 2px !important;
+  color:#F4ECDC !important; text-shadow:0 2px 18px rgba(0,0,0,.6); }}
+.lg .sub {{ color:#E6CD8E; font-family:'Cormorant Garamond', Georgia, serif; font-size:1.25rem; font-style:italic; margin-bottom:6px; }}
+.lg p {{ color:#CBBFA6 !important; max-width:430px; margin:6px auto 0; }}
+.lg-feats {{ display:flex; flex-wrap:wrap; justify-content:center; gap:8px; margin:18px 0 6px; }}
+.lg-feats span {{ font-size:.85rem; font-weight:700; color:#F4ECDC; padding:6px 12px; border-radius:999px;
+  border:1px solid rgba(201,168,92,.55); background:rgba(255,255,255,.06); }}
+.st-key-login_btn button {{ background:#FFFFFF !important; color:#1F1F1F !important; border:none !important;
+  min-height:52px; border-radius:14px !important; box-shadow:0 10px 28px rgba(0,0,0,.4) !important; }}
+.st-key-login_btn button p {{ color:#1F1F1F !important; font-weight:800 !important; font-size:1.05rem !important; }}
+.st-key-login_btn button::before {{ content:''; width:22px; height:22px; margin-right:10px;
+  background:url("{_G_SVG}") center/contain no-repeat; }}
+.lg-foot {{ text-align:center; color:#CBBFA6; font-size:.8rem; margin-top:14px; opacity:.8; }}
+</style>
+<div class="lg"><img src="app/static/logo-192.png" alt="">
+  <h1>{title}</h1><div class="sub">Speak. Learn. Grow.</div><p>{subtitle}</p>{feats}</div>""", unsafe_allow_html=True)

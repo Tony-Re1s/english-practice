@@ -517,6 +517,11 @@ if ss.mode == "aovivo" and not ss.summary:
                          max_seconds=prof.live_daily_minutes * 60,
                          session_max_seconds=LIVE_MAX_SESSION_MIN * 60, session_key=ss.live_session_key)
     st.caption("Dica: use fone de ouvido. A transcrição e o resumo aparecem quando a chamada terminar.")
+    if st.button("↩️ Voltar sem ligar", width="stretch",
+                 help="Use só se a chamada ainda não começou. Para encerrar uma chamada em andamento, toque no botão dela."):
+        db.end_session(ss.session_id, None)
+        reset_session()
+        st.rerun()
     if res:
         handle_live_end(res)
         st.rerun()

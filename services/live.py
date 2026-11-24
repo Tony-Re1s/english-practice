@@ -56,7 +56,7 @@ export default function (component) {
   let S = root.__lv;
   if (!S || S.sessionKey !== d.session_key) {
     S = root.__lv = { state: 'idle', sessionKey: d.session_key, transcript: [], seconds: 0, sent: false };
-    root.innerHTML = '';
+    const old = root.querySelector('.lv'); if (old) old.remove();   // não apaga o <style> do componente
     const w = document.createElement('div'); w.className = 'lv';
     w.innerHTML = '<button class="lv-btn" type="button">📞</button><div class="lv-status"></div><div class="lv-hint"></div>' +
                   '<div class="lv-bar"><div class="lv-fill"></div></div><div class="lv-time"></div><div class="lv-cap"></div>';

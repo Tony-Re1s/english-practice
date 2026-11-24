@@ -14,7 +14,9 @@ MUTED = "#5D7A82"
 CSS = f"""
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Nunito:wght@400;600;700;800&display=swap');
-html, body, [class*="st-"], .stMarkdown, button, input, textarea {{ font-family: 'Nunito', system-ui, sans-serif !important; }}
+.stApp p, .stApp li, .stApp label, .stApp h1, .stApp h2, .stApp h3, .stApp h4,
+.stApp input, .stApp textarea, .stApp button p, .hero, .msg, .tip, .pill {{ font-family: 'Nunito', system-ui, sans-serif !important; }}
+[data-testid="stIconMaterial"], .material-symbols-rounded {{ font-family: 'Material Symbols Rounded' !important; }}
 .block-container {{ padding-top: 2.2rem; max-width: 760px; }}
 h1, h2, h3 {{ color: {INK}; letter-spacing: -.01em; }}
 

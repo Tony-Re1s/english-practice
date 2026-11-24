@@ -148,3 +148,142 @@ _head = st.components.v2.component("english_head_tags", js=_HEAD_JS)
 def install_app_icons() -> None:
     """Ícone e nome do app quando você salva na tela de início (iPhone) ou instala no Mac."""
     _head(key="head_tags")
+
+
+# --- Temas imersivos (Londres para adultos, Espaço para o nível Criança) --------------------
+# O fundo é uma foto fixa em camadas: a foto se mexe de leve (zoom lento + parallax com o
+# mouse ou a inclinação do celular) e o conteúdo fica num painel de vidro por cima.
+# Tudo é CSS; as imagens são WebP pequenos e só a do tema em uso é baixada.
+THEMES = {
+    "london": {
+        "bg": "app/static/theme/lon_bg.webp", "bg_wide": "app/static/theme/lon_bg.webp",
+        "font": "Cormorant+Garamond:wght@600;700", "title_font": "'Cormorant Garamond', Georgia, serif",
+        "panel": "rgba(13,20,36,.80)", "edge": "rgba(201,168,92,.55)", "text": "#F4ECDC", "muted": "#CBBFA6",
+        "accent": "#C9A85C", "accent2": "#E6CD8E", "accent_ink": "#1B1408",
+        "overlay": "linear-gradient(180deg, rgba(10,14,26,.10) 0%, rgba(10,14,26,.35) 45%, rgba(10,14,26,.70) 100%)",
+    },
+    "space": {
+        "bg": "app/static/theme/space_bg.webp", "bg_wide": "app/static/theme/space_bg_wide.webp",
+        "font": "Exo+2:wght@600;800", "title_font": "'Exo 2', 'Nunito', sans-serif",
+        "panel": "rgba(10,12,38,.62)", "edge": "rgba(126,232,255,.35)", "text": "#EAF2FF", "muted": "#AFC0E8",
+        "accent": "#38D6F5", "accent2": "#A78BFA", "accent_ink": "#061021",
+        "overlay": "radial-gradient(120% 80% at 50% 0%, rgba(0,0,0,0) 0%, rgba(4,6,20,.35) 70%)",
+    },
+}
+
+
+def theme_css(name: str) -> str:
+    t = THEMES[name]
+    return f"""
+<style>
+@import url('https://fonts.googleapis.com/css2?family={t['font']}&display=swap');
+.stApp {{ background:#05070F !important; }}
+.stApp::before {{ content:''; position:fixed; inset:-6%; z-index:0; pointer-events:none;
+  background:url('{t['bg']}') center/cover no-repeat;
+  translate: calc(var(--px,0) * -14px) calc(var(--py,0) * -10px);
+  animation: ep-kb 48s ease-in-out infinite alternate; }}
+@media (min-aspect-ratio: 1/1) {{ .stApp::before {{ background-image:url('{t['bg_wide']}'); }} }}
+.stApp::after {{ content:''; position:fixed; inset:0; z-index:0; pointer-events:none; background:{t['overlay']}; }}
+@keyframes ep-kb {{ from {{ scale:1.02 }} to {{ scale:1.10 }} }}
+@media (prefers-reduced-motion: reduce) {{ .stApp::before {{ animation:none; translate:none; }} }}
+[data-testid="stAppViewContainer"], [data-testid="stMain"], [data-testid="stBottom"] > div,
+[data-testid="stBottomBlockContainer"] {{ background:transparent !important; position:relative; z-index:1; }}
+.block-container {{ background:{t['panel']}; backdrop-filter: blur(14px) saturate(1.2); -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  border:1px solid {t['edge']}; border-radius:26px; margin-top:12px; margin-bottom:12px;
+  padding:1.3rem 1.3rem 2rem !important; box-shadow:0 20px 60px rgba(0,0,0,.45); animation: ep-in .45s ease-out; }}
+@keyframes ep-in {{ from {{ opacity:0; transform: translateY(10px) scale(.985) }} to {{ opacity:1; transform:none }} }}
+.stApp p, .stApp li, .stApp label, .stApp h1, .stApp h2, .stApp h3, .stApp h4, .stApp span,
+[data-testid="stCaptionContainer"], [data-testid="stMarkdownContainer"] {{ color:{t['text']}; }}
+[data-testid="stCaptionContainer"] p {{ color:{t['muted']} !important; }}
+.hero {{ background:transparent !important; border:none !important; padding:8px 2px 4px !important; }}
+.hero h1 {{ font-family:{t['title_font']} !important; font-size:2.3rem !important; color:{t['text']} !important;
+  text-shadow:0 2px 18px rgba(0,0,0,.55); letter-spacing:.01em; }}
+.hero p {{ color:{t['muted']} !important; }}
+.brand span {{ color:{t['text']} !important; font-family:{t['title_font']} !important; font-size:1.3rem !important; }}
+.pill {{ background:rgba(255,255,255,.08) !important; color:{t['accent2']} !important; border-color:{t['edge']} !important; }}
+/* botões, pílulas e abas */
+.stButton > button[kind="secondary"], [data-testid="stPills"] button, [data-testid="stButtonGroup"] button {{
+  background:rgba(255,255,255,.07) !important; color:{t['text']} !important; border:1px solid {t['edge']} !important;
+  transition: transform .15s ease, background .2s ease; }}
+.stButton > button[kind="secondary"] p, [data-testid="stPills"] button p, [data-testid="stButtonGroup"] button p {{ color:{t['text']} !important; }}
+.stButton > button:active, [data-testid="stPills"] button:active {{ transform:scale(.96); }}
+[data-testid="stPills"] button[kind*="Active"], [data-testid="stButtonGroup"] button[kind*="Active"],
+.stButton > button[kind="primary"], [data-testid="stFormSubmitButton"] button {{
+  background:linear-gradient(135deg, {t['accent2']}, {t['accent']}) !important; color:{t['accent_ink']} !important;
+  border:none !important; box-shadow:0 6px 20px rgba(0,0,0,.35); }}
+[data-testid="stPills"] button[kind*="Active"] p, [data-testid="stButtonGroup"] button[kind*="Active"] p,
+.stButton > button[kind="primary"] p, [data-testid="stFormSubmitButton"] button p {{ color:{t['accent_ink']} !important; }}
+[data-testid="stTab"] p {{ color:{t['muted']} !important; }}
+[data-testid="stTab"][aria-selected="true"] p {{ color:{t['accent2']} !important; }}
+[data-testid="stExpander"], [data-testid="stVerticalBlockBorderWrapper"] {{ background:rgba(255,255,255,.05) !important; border-color:{t['edge']} !important; }}
+[data-testid="stBottom"] {{ background:linear-gradient(180deg, rgba(0,0,0,0), rgba(5,7,15,.85) 40%) !important; }}
+.summary {{ background:rgba(255,255,255,.06) !important; border-color:{t['edge']} !important; }}
+.bubble, .tip, .tip *, .msg .bubble * {{ color:#21414A !important; }}
+hr {{ border-color:{t['edge']} !important; }}
+</style>"""
+
+
+_PARALLAX_JS = """
+export default function () {
+  const W = window.parent && window.parent !== window ? window : window;
+  if (W.__epPar) return; W.__epPar = 1;
+  const root = document.documentElement;
+  let tx = 0, ty = 0, x = 0, y = 0;
+  const set = (a, b) => { tx = Math.max(-1, Math.min(1, a)); ty = Math.max(-1, Math.min(1, b)); };
+  window.addEventListener('mousemove', e => set(e.clientX / innerWidth * 2 - 1, e.clientY / innerHeight * 2 - 1), { passive: true });
+  window.addEventListener('deviceorientation', e => { if (e.gamma != null) set(e.gamma / 25, (e.beta - 45) / 25); }, { passive: true });
+  (function tick() {   // suaviza o movimento; quase nada de CPU
+    x += (tx - x) * .06; y += (ty - y) * .06;
+    root.style.setProperty('--px', x.toFixed(3)); root.style.setProperty('--py', y.toFixed(3));
+    requestAnimationFrame(tick);
+  })();
+}
+"""
+_parallax = st.components.v2.component("english_parallax", js=_PARALLAX_JS)
+
+
+def apply_theme(name: str) -> None:
+    """name: 'classic' (visual claro de antes), 'london' ou 'space'."""
+    if name not in THEMES:
+        return
+    st.markdown(theme_css(name), unsafe_allow_html=True)
+    _parallax(key="parallax")
+
+
+# --- Cartões com foto (cenários do tema Londres) ---------------------------------------------
+_CARDS_CSS = """
+.sc { display:grid; grid-template-columns:repeat(2, 1fr); gap:10px; font-family:'Nunito',system-ui,sans-serif; }
+.sc-c { position:relative; height:112px; border-radius:18px; overflow:hidden; cursor:pointer; border:1px solid rgba(201,168,92,.45);
+  background-size:cover; background-position:center; box-shadow:0 8px 24px rgba(0,0,0,.35);
+  transition: transform .35s cubic-bezier(.2,.8,.2,1), box-shadow .35s ease, filter .35s ease; }
+.sc-c::after { content:''; position:absolute; inset:0; background:linear-gradient(180deg, rgba(0,0,0,0) 35%, rgba(5,8,18,.82)); }
+.sc-c span { position:absolute; left:12px; bottom:10px; z-index:1; color:#F7F0E1; font-weight:800; font-size:15px;
+  text-shadow:0 1px 6px rgba(0,0,0,.6); }
+.sc-c:hover { transform:translateY(-2px); }
+.sc-c.on { border:2px solid #E6CD8E; box-shadow:0 0 0 3px rgba(230,205,142,.25), 0 10px 28px rgba(0,0,0,.45); }
+.sc-c.zoom { transform:scale(1.07); filter:brightness(1.15); z-index:2; }
+.sc-c.wide { grid-column: span 2; }
+"""
+_CARDS_JS = """
+export default function (component) {
+  const { data, setTriggerValue, parentElement } = component;
+  const old = parentElement.querySelector('.sc'); if (old) old.remove();
+  const box = document.createElement('div'); box.className = 'sc';
+  (data.items || []).forEach((it, i, arr) => {
+    const c = document.createElement('div');
+    c.className = 'sc-c' + (it.key === data.selected ? ' on' : '') + (arr.length % 2 && i === arr.length - 1 ? ' wide' : '');
+    c.style.backgroundImage = `url('${it.img}')`;
+    c.innerHTML = `<span>${it.label}</span>`;
+    c.addEventListener('click', () => { c.classList.add('zoom'); setTimeout(() => setTriggerValue('pick', it.key), 260); });
+    box.appendChild(c);
+  });
+  parentElement.appendChild(box);
+}
+"""
+_cards = st.components.v2.component("english_scene_cards", css=_CARDS_CSS, js=_CARDS_JS)
+
+
+def scene_cards(items: list[dict], selected: str, key: str):
+    """items: [{'key','label','img'}]. Retorna a chave tocada (ou None)."""
+    res = _cards(key=key, data={"items": items, "selected": selected}, on_pick_change=lambda: None)
+    return getattr(res, "pick", None)

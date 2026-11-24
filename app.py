@@ -67,6 +67,24 @@ st.session_state.setdefault("slow_voice", False)
 st.session_state.setdefault("show_text", True)
 st.session_state.setdefault("live_blocked", False)
 ss = st.session_state
+if "theme_pref" not in ss:
+    try:
+        ss.theme_pref = (db.get_pref(email, "tema") if db.enabled() else None) or "london"
+    except Exception:
+        ss.theme_pref = "london"
+
+
+def current_theme() -> str:
+    """Nível Criança → Espaço; os outros níveis → o tema escolhido em Ajustes (Londres ou Clássico)."""
+    lvl = ss.get("level_pick") or ss.level
+    if ss.view == "aprender" and not prof.level_locked and ss.get("learn_level"):
+        lvl = ss.learn_level
+    if LEVELS.get(lvl, {}).get("kids"):
+        return "space"
+    return ss.theme_pref
+
+
+ui.apply_theme(current_theme())
 if prof.level_locked:
     ss.level = prof.level
 
@@ -356,6 +374,15 @@ def settings_view() -> None:
     ss.slow_voice = st.toggle("🐢 Voz devagar", value=ss.slow_voice, help="A parceira fala mais devagar sempre.")
     ss.show_text = st.toggle("👀 Mostrar texto das respostas", value=ss.show_text,
                              help="Desligue para treinar a escuta: o texto fica escondido até você abrir.")
+    themes = {"london": "🇬🇧 Londres (imersivo)", "classic": "🤍 Clássico (claro)"}
+    pick = st.segmented_control("Visual do app", list(themes), format_func=lambda k: themes[k],
+                                default=ss.theme_pref if ss.theme_pref in themes else "london", key="theme_pick")
+    if pick and pick != ss.theme_pref:
+        ss.theme_pref = pick
+        if db.enabled():
+            db.set_pref(email, "tema", pick)
+        st.rerun()
+    st.caption("No nível Criança o app vira sempre o tema Espaço.")
     st.divider()
     st.markdown(f"**Conta:** {email}" + (" · administrador" if prof.is_admin else ""))
     lv = LEVELS.get(prof.level or "", None)
@@ -807,6 +834,9 @@ if not ss.started and ss.view != "inicio":
 
 
 # --- Tela inicial: escolher nível, modo e cenário ------------------------------------
+SCENE_IMG = {"dia_a_dia": "app/static/theme/lon_daily.webp", "trabalho": "app/static/theme/lon_work.webp",
+             "intercambio": "app/static/theme/lon_travel.webp", "assuntos": "app/static/theme/lon_topics.webp",
+             "livre": "app/static/theme/lon_free.webp"}
 if not ss.started:
     ui.brand()
     ui.hero("Pronto para conversar?", "Escolha o nível, o modo e o assunto. Ela responde e te ajuda a soar mais natural.")
@@ -838,8 +868,18 @@ if not ss.started:
 
     kids = LEVELS[ss.level].get("kids")
     scen_keys = ["criancas"] if kids else [k for k in SCENARIOS if k != "criancas"]
-    scen_key = st.pills("Cenário", scen_keys, format_func=lambda k: SCENARIOS[k]["label"],
-                        default=scen_keys[0], selection_mode="single", key=f"scen_{int(bool(kids))}") or scen_keys[0]
+    if current_theme() == "london" and not kids:
+        st.markdown("**Cenário**")
+        cur = ss.get("scen_card") if ss.get("scen_card") in scen_keys else scen_keys[0]
+        picked = ui.scene_cards([{"key": k, "label": SCENARIOS[k]["label"], "img": SCENE_IMG.get(k, "")}
+                                 for k in scen_keys], cur, key="scen_cards")
+        if picked and picked != cur:
+            ss.scen_card = picked
+            st.rerun()
+        scen_key = cur
+    else:
+        scen_key = st.pills("Cenário", scen_keys, format_func=lambda k: SCENARIOS[k]["label"],
+                            default=scen_keys[0], selection_mode="single", key=f"scen_{int(bool(kids))}") or scen_keys[0]
     scen = SCENARIOS[scen_key]
     if scen["situations"]:
         situation = st.pills("Assunto" if scen_key == "assuntos" else "Situação", list(scen["situations"]),

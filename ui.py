@@ -156,7 +156,7 @@ def install_app_icons() -> None:
 # Tudo é CSS; as imagens são WebP pequenos e só a do tema em uso é baixada.
 THEMES = {
     "london": {
-        "bg": "app/static/theme/lon_bg.webp", "bg_wide": "app/static/theme/lon_bg.webp",
+        "bg": "app/static/theme/lon_bg.webp", "bg_wide": "app/static/theme/lon_bg_wide.webp",
         "font": "Cormorant+Garamond:wght@600;700", "title_font": "'Cormorant Garamond', Georgia, serif",
         "panel": "rgba(13,20,36,.80)", "edge": "rgba(201,168,92,.55)", "text": "#F4ECDC", "muted": "#CBBFA6",
         "accent": "#C9A85C", "accent2": "#E6CD8E", "accent_ink": "#1B1408",

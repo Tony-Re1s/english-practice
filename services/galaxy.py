@@ -37,12 +37,11 @@ CSS = """
 .gx-p.cur { animation: gx-pulse 1.6s ease-in-out infinite; border-radius:50%; }
 .gx-p.sel { outline:3px solid #FFE27A; outline-offset:4px; border-radius:50%; }
 .gx-p.boss { width:90px; height:90px; font-size:20px; }
-.gx-p.sun { background: radial-gradient(circle at 40% 38%, #FFFBE0 0%, #FFE07A 25%, #FFB03A 55%, #F26B1D 80%, rgba(242,107,29,0) 100%);
-  border-radius:50%; box-shadow:0 0 30px 8px rgba(255,170,60,.55), 0 0 70px 20px rgba(255,120,30,.25);
-  animation: gx-sun 4s ease-in-out infinite; }
-@keyframes gx-sun { 50% { box-shadow:0 0 38px 12px rgba(255,190,80,.65), 0 0 90px 28px rgba(255,120,30,.30) } }
+.gx-p.sun { filter: drop-shadow(0 0 18px rgba(255,160,50,.75)); animation: gx-sun 4s ease-in-out infinite; }
+@keyframes gx-sun { 50% { filter: drop-shadow(0 0 30px rgba(255,190,80,.95)) } }
 .gx-stars { font-size:12px; letter-spacing:1px; min-height:15px; }
-.gx-ship { position:absolute; top:-12px; right:0; font-size:24px; animation: gx-float 2.2s ease-in-out infinite; z-index:2; }
+.gx-ship { position:absolute; top:-16px; right:-6px; width:34px; height:34px; animation: gx-float 2.2s ease-in-out infinite; z-index:2;
+  background:url('app/static/theme/rocket.webp') center/contain no-repeat; filter:drop-shadow(0 4px 8px rgba(0,0,0,.5)); }
 .gx-num { position:absolute; inset:0; display:flex; align-items:center; justify-content:center; }
 .gx-foot { text-align:center; font-size:12.5px; opacity:.85; margin-top:12px; }
 @keyframes gx-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(255,226,122,.7) } 50% { box-shadow: 0 0 0 10px rgba(255,226,122,0) } }
@@ -85,10 +84,10 @@ export default function (component) {
     const cls = ['gx-p'];
     if (pl.boss) cls.push('boss', pl.boss);
     if (pl.locked) cls.push('lock'); if (pl.current) cls.push('cur'); if (pl.selected) cls.push('sel');
-    const img = pl.boss === 'sun' ? '' : (pl.boss === 'moon' ? 'p_moon' : PLANETS[(pl.num - 1) % 10 % PLANETS.length]);
+    const img = pl.boss === 'sun' ? 'sun' : (pl.boss === 'moon' ? 'p_moon' : PLANETS[(pl.num - 1) % 10 % PLANETS.length]);
     const bg = img ? `background-image:url('${IMG}${img}.webp');` : '';
     const label = `<span class="gx-num">${pl.locked ? '🔒' : pl.num}</span>`;
-    return `<div class="gx-cell">${pl.current ? `<span class="gx-ship">${d.ship || '🚀'}</span>` : ''}
+    return `<div class="gx-cell">${pl.current ? '<span class="gx-ship"></span>' : ''}
       <button class="${cls.join(' ')}" style="${bg}" data-n="${pl.num}" ${pl.locked ? 'disabled' : ''}
         aria-label="Planeta ${pl.num}">${label}</button>
       <div class="gx-stars">${pl.done ? stars(pl.stars) : ''}</div></div>`;

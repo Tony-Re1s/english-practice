@@ -47,6 +47,20 @@ h1, h2, h3 {{ color: {INK}; letter-spacing: -.01em; }}
 [data-testid="stExpander"] {{ border-radius: 14px !important; border-color:#E3F1EF !important; background:#FBFEFE; }}
 [data-testid="stSidebar"] {{ background: #F3FBFA; }}
 .summary {{ background:#FFFFFF; border:1.5px solid #D8F0ED; border-radius:18px; padding: 6px 20px 14px; }}
+
+/* cara de aplicativo: sem barra lateral nem cabeçalho do Streamlit */
+[data-testid="stSidebar"], [data-testid="stSidebarCollapsedControl"], [data-testid="stSidebarNav"] {{ display:none !important; }}
+header[data-testid="stHeader"] {{ display:none !important; }}
+footer {{ display:none !important; }}
+.block-container {{ padding-top: 1.2rem !important; }}
+
+/* barra de navegação no rodapé */
+[data-testid="stBottom"] [data-testid="stButtonGroup"] {{ width:100%; }}
+[data-testid="stBottom"] [data-testid="stButtonGroup"] > div {{ width:100%; display:flex; }}
+[data-testid="stBottom"] [data-testid="stButtonGroup"] button {{ flex:1; border-radius:14px !important; font-weight:700; }}
+.brand {{ display:flex; align-items:center; gap:10px; margin-bottom:6px; }}
+.brand img {{ width:38px; height:38px; border-radius:10px; box-shadow:0 2px 8px rgba(33,65,74,.12); }}
+.brand span {{ font-weight:800; font-size:1.15rem; color:{INK}; }}
 </style>
 """
 
@@ -83,3 +97,35 @@ def correction(better: str, tip_pt: str) -> None:
         f'<div class="tip">✏️ <b>Mais natural:</b> {_fmt(better)}<br><span class="why">💡 {_fmt(tip_pt)}</span></div>',
         unsafe_allow_html=True,
     )
+
+
+def brand() -> None:
+    st.markdown('<div class="brand"><img src="app/static/logo-192.png" alt=""><span>English Practice</span></div>',
+                unsafe_allow_html=True)
+
+
+_HEAD_JS = """
+export default function () {
+  const head = document.head;
+  const add = (tag, attrs) => {
+    const sel = tag + Object.entries(attrs).filter(([k]) => k === 'rel' || k === 'name').map(([k, v]) => `[${k}="${v}"]`).join('');
+    if (head.querySelector(sel)) return;
+    const el = document.createElement(tag);
+    Object.entries(attrs).forEach(([k, v]) => el.setAttribute(k, v));
+    head.appendChild(el);
+  };
+  add('link', { rel: 'apple-touch-icon', href: '/app/static/apple-touch-icon.png' });
+  add('link', { rel: 'manifest', href: '/app/static/manifest.json' });
+  add('meta', { name: 'apple-mobile-web-app-capable', content: 'yes' });
+  add('meta', { name: 'mobile-web-app-capable', content: 'yes' });
+  add('meta', { name: 'apple-mobile-web-app-title', content: 'English' });
+  add('meta', { name: 'apple-mobile-web-app-status-bar-style', content: 'default' });
+  add('meta', { name: 'theme-color', content: '#3FB8AF' });
+}
+"""
+_head = st.components.v2.component("english_head_tags", js=_HEAD_JS)
+
+
+def install_app_icons() -> None:
+    """Ícone e nome do app quando você salva na tela de início (iPhone) ou instala no Mac."""
+    _head(key="head_tags")

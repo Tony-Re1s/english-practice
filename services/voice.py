@@ -8,6 +8,7 @@ Cada etapa só entra se a chave dela estiver nos Secrets (Edge e gTTS não usam 
 
 import asyncio
 import io
+import threading
 import time
 import wave
 
@@ -37,31 +38,52 @@ def audio_seconds(audio: bytes) -> float | None:
         return None
 
 
-def _key(name: str) -> str:
-    return str(st.secrets.get(name, "") or "")
+# Chaves da pessoa usando o app agora (isoladas por sessão: cada sessão roda na sua própria thread)
+_local = threading.local()
+
+
+def set_keys(keys: dict) -> None:
+    """Define quais chaves valem para esta pessoa (a do dono, a própria, ou nenhuma)."""
+    _local.keys = {k: v for k, v in (keys or {}).items() if v}
+
+
+def _key(provider: str) -> str:
+    return str(getattr(_local, "keys", {}).get(provider) or "")
 
 
 def can_listen() -> bool:
-    return any(_key(k) for k in ("GROQ_API_KEY", "GEMINI_API_KEY", "OPENAI_API_KEY"))
+    return any(_key(k) for k in ("groq", "gemini", "openai"))
 
 
-# --- Clientes -----------------------------------------------------------------
-@st.cache_resource
-def _openai():
+# --- Clientes (um por chave) ------------------------------------------------------
+@st.cache_resource(max_entries=20)
+def _openai_client(key: str):
     from openai import OpenAI
-    return OpenAI(api_key=_key("OPENAI_API_KEY"))
+    return OpenAI(api_key=key)
 
 
-@st.cache_resource
-def _groq():
+@st.cache_resource(max_entries=20)
+def _groq_client(key: str):
     from openai import OpenAI  # a Groq aceita o mesmo SDK
-    return OpenAI(api_key=_key("GROQ_API_KEY"), base_url="https://api.groq.com/openai/v1")
+    return OpenAI(api_key=key, base_url="https://api.groq.com/openai/v1")
 
 
-@st.cache_resource
-def _gemini():
+@st.cache_resource(max_entries=20)
+def _gemini_client(key: str):
     from google import genai
-    return genai.Client(api_key=_key("GEMINI_API_KEY"))
+    return genai.Client(api_key=key)
+
+
+def _openai():
+    return _openai_client(_key("openai"))
+
+
+def _groq():
+    return _groq_client(_key("groq"))
+
+
+def _gemini():
+    return _gemini_client(_key("gemini"))
 
 
 # --- Ouvir ---------------------------------------------------------------------
@@ -99,9 +121,9 @@ def _stt_openai(audio: bytes, mime: str) -> str:
 
 
 STT_CHAIN = [
-    ("Groq", "GROQ_API_KEY", GROQ_STT_MODEL, _stt_groq),
-    ("Gemini", "GEMINI_API_KEY", GEMINI_STT_MODEL, _stt_gemini),
-    ("OpenAI", "OPENAI_API_KEY", OPENAI_STT_MODEL, _stt_openai),
+    ("Groq", "groq", GROQ_STT_MODEL, _stt_groq),
+    ("Gemini", "gemini", GEMINI_STT_MODEL, _stt_gemini),
+    ("OpenAI", "openai", OPENAI_STT_MODEL, _stt_openai),
 ]
 
 
@@ -194,8 +216,8 @@ def _tts_gtts(text: str, pace: str) -> tuple[bytes, str]:
 
 TTS_CHAIN = [
     ("Edge", None, EDGE_VOICE, _tts_edge),
-    ("Gemini", "GEMINI_API_KEY", GEMINI_TTS_MODEL, _tts_gemini),
-    ("OpenAI", "OPENAI_API_KEY", OPENAI_TTS_MODEL, _tts_openai),
+    ("Gemini", "gemini", GEMINI_TTS_MODEL, _tts_gemini),
+    ("OpenAI", "openai", OPENAI_TTS_MODEL, _tts_openai),
     ("gTTS", None, "gtts", _tts_gtts),
 ]
 

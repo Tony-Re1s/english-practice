@@ -7,9 +7,15 @@ from config import CHAT_MAX_TOKENS, CHAT_MODEL, SUMMARY_MAX_TOKENS, SUMMARY_MODE
 from prompts import RESPOND_TOOL, SUMMARY_SYSTEM
 
 
-@st.cache_resource
-def _client() -> anthropic.Anthropic:
-    return anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+@st.cache_resource(max_entries=20)
+def _client(api_key: str) -> anthropic.Anthropic:
+    return anthropic.Anthropic(api_key=api_key)
+
+
+def _need(api_key: str | None) -> str:
+    if not api_key:
+        raise RuntimeError("Sem chave da Anthropic liberada para esta conta. Fale com o administrador do app.")
+    return api_key
 
 
 def _usage(resp, model: str) -> dict:
@@ -18,9 +24,9 @@ def _usage(resp, model: str) -> dict:
             "output_tokens": getattr(u, "output_tokens", 0) or 0}
 
 
-def tutor_turn(system: str, messages: list[dict]) -> dict:
+def tutor_turn(system: str, messages: list[dict], api_key: str | None) -> dict:
     """Retorna {'reply', 'correction'|None, 'suggestions', 'end_session', '_usage'}."""
-    resp = _client().messages.create(
+    resp = _client(_need(api_key)).messages.create(
         model=CHAT_MODEL,
         max_tokens=CHAT_MAX_TOKENS,
         system=system,
@@ -39,12 +45,12 @@ def tutor_turn(system: str, messages: list[dict]) -> dict:
     raise RuntimeError("O modelo não devolveu uma resposta válida.")
 
 
-def session_summary(transcript: str, corrections: list[dict], cefr: str = "B1") -> tuple[str, dict]:
+def session_summary(transcript: str, corrections: list[dict], cefr: str, api_key: str | None) -> tuple[str, dict]:
     corr_txt = "\n".join(
         f"- Aluno: {c['original']} → Melhor: {c['better']} ({c['tip_pt']})" for c in corrections
     ) or "(nenhuma correção durante a sessão)"
     user_msg = f"TRANSCRIÇÃO:\n{transcript}\n\nCORREÇÕES FEITAS NA HORA:\n{corr_txt}"
-    resp = _client().messages.create(
+    resp = _client(_need(api_key)).messages.create(
         model=SUMMARY_MODEL,
         max_tokens=SUMMARY_MAX_TOKENS,
         system=SUMMARY_SYSTEM.format(cefr=cefr),

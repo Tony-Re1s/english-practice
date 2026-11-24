@@ -25,6 +25,11 @@ SCHEMA = [
         step text, provider text, model text, ok boolean, input_tokens int, output_tokens int,
         audio_seconds numeric, chars int, latency_ms int, est_cost_usd numeric, error text)""",
     "create index if not exists ep_usage_ts on ep_usage (ts desc)",
+    """create table if not exists ep_users (
+        email text primary key, name text, active boolean default true, is_admin boolean default false,
+        level text, level_locked boolean default false, daily_turns int, live_enabled boolean default false,
+        live_daily_minutes int, key_policy jsonb default '{}'::jsonb, keys_enc jsonb default '{}'::jsonb,
+        created_at timestamptz default now(), updated_at timestamptz default now())""",
 ]
 
 _lock = threading.Lock()
@@ -167,3 +172,58 @@ def sessions_recent(user_email: str, limit: int = 30) -> list[dict]:
 def session_turns(session_id: int) -> list[dict]:
     return _run("select role, text, correction from ep_turns where session_id = %s order by id",
                 (session_id,), fetch=True)
+
+
+# --- usuários (painel do administrador) -----------------------------------------------
+def get_user(email: str) -> dict | None:
+    rows = _run("select * from ep_users where lower(email) = lower(%s)", (email,), fetch=True)
+    return rows[0] if rows else None
+
+
+def list_users() -> list[dict]:
+    return _run("select * from ep_users order by is_admin desc, email", fetch=True)
+
+
+def upsert_user(email: str, **fields) -> None:
+    fields = {k: (json.dumps(v) if isinstance(v, dict) else v) for k, v in fields.items()}
+    cols = ["email"] + list(fields)
+    vals = [email.strip().lower()] + list(fields.values())
+    sets = ", ".join(f"{c} = excluded.{c}" for c in fields) + ", updated_at = now()"
+    _run(f"insert into ep_users ({', '.join(cols)}) values ({', '.join(['%s'] * len(cols))}) "
+         f"on conflict (email) do update set {sets}", tuple(vals))
+
+
+def delete_user(email: str) -> None:
+    _run("delete from ep_users where lower(email) = lower(%s)", (email,))
+
+
+# --- limites do dia (dia de Brasília) ------------------------------------------------------
+def turns_today(user_email: str) -> int:
+    rows = _run("""select count(*) as n from ep_turns t join ep_sessions s on s.id = t.session_id
+                   where s.user_email = %s and t.role = 'user'
+                     and (t.ts at time zone 'America/Sao_Paulo')::date = (now() at time zone 'America/Sao_Paulo')::date""",
+                (user_email,), fetch=True)
+    return int(rows[0]["n"]) if rows else 0
+
+
+def live_seconds_today(user_email: str) -> float:
+    rows = _run("""select coalesce(sum(audio_seconds), 0) as s from ep_usage
+                   where user_email = %s and step = 'ao vivo' and ok
+                     and (ts at time zone 'America/Sao_Paulo')::date = (now() at time zone 'America/Sao_Paulo')::date""",
+                (user_email,), fetch=True)
+    return float(rows[0]["s"]) if rows else 0.0
+
+
+def live_blocked_since_reset(reset_hour_brt: int) -> bool:
+    """True se o Gemini Live recusou por cota depois da última renovação (≈5h de Brasília)."""
+    rows = _run("""select count(*) as n from ep_usage
+                   where step = 'ao vivo' and not ok and error ilike '%%cota%%'
+                     and ts > (date_trunc('day', (now() at time zone 'America/Sao_Paulo') - make_interval(hours => %s))
+                               + make_interval(hours => %s)) at time zone 'America/Sao_Paulo'""",
+                (reset_hour_brt, reset_hour_brt), fetch=True)
+    return bool(rows and rows[0]["n"])
+
+
+def known_users() -> list[str]:
+    rows = _run("select distinct user_email from ep_sessions where user_email is not null order by 1", fetch=True)
+    return [r["user_email"] for r in rows]

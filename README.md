@@ -3,7 +3,11 @@
 Parceira de conversação em inglês (nível B1) com voz, correções curtas a cada fala e resumo no fim da sessão.
 
 ## O que tem
-- **3 níveis**: 🌱 Básico (A2), 🌿 Intermediário (B1), 🌳 Avançado (B2-C1) — muda vocabulário, tamanho das respostas, rigor das correções e ritmo da voz.
+- **5 níveis**: 🧒 Criança (7-8 anos), 🍼 Iniciante (A1), 🌱 Básico (A2), 🌿 Intermediário (B1), 🌳 Avançado (B2+).
+- **Correção falada**: quando você erra, ela confirma o que você quis dizer ("Do you mean: …?") e segue a conversa.
+- **3 modos**: 🎧 mãos livres, 👆 apertar para falar e ⚡ ao vivo (Gemini Live grátis, com limite de minutos por dia; nunca usa a OpenAI).
+- **👥 Usuários** (admin): liberar e-mails, travar o nível, limite de falas por dia, minutos ao vivo e, serviço por serviço, usar a chave do dono, uma chave própria (criptografada) ou desligar.
+- **Cara de app**: navegação no rodapé, logo e ícone para a tela de início do iPhone/Mac.
 - **5 cenários**: Dia a dia, Trabalho, Intercâmbio/viagem, 🧠 Assuntos (mercado financeiro, câmbio, tesouraria, tecnologia...) e Conversa livre.
 - **📊 Uso e histórico**: cada IA usada (conversa, ouvir, falar), falhas e trocas de serviço, custo estimado, alerta se a OpenAI foi usada, e todas as conversas antigas com correções e resumo (precisa `DATABASE_URL`).
 - **Encerrar**: botão ou diga *"let's stop here"* — desliga o microfone e mostra o resumo.
@@ -35,7 +39,7 @@ services/voice.py    # voz com fallback: grátis primeiro, OpenAI por último
 | `GEMINI_API_KEY` | Ouvir e falar, 2ª opção (aistudio.google.com) | Não |
 | `OPENAI_API_KEY` | Ouvir e falar, reserva paga (platform.openai.com) | Não |
 | `DATABASE_URL` | Registro de uso e histórico (Neon, grátis) | Recomendado |
-| `[auth]` + `ALLOWED_EMAILS` | Login com Google; só os e-mails da lista entram | Recomendado |
+| `[auth]` + `ALLOWED_EMAILS` | Login com Google; os e-mails da lista são administradores. Outras pessoas entram se forem liberadas em 👥 Usuários | Recomendado |
 
 As duas APIs cobram por uso. Configure um limite de gasto mensal em cada painel.
 

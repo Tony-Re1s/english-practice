@@ -22,28 +22,42 @@ OPENAI_TTS_MODEL = "gpt-4o-mini-tts"
 OPENAI_TTS_VOICE = "nova"
 
 # --- Níveis ------------------------------------------------------------------
-# pace = ritmo padrão da voz nesse nível (o botão "ouvir devagar" sempre usa "slow")
+# pace = ritmo padrão da voz (o botão "voz devagar" sempre usa "slow")
 LEVELS = {
+    "crianca": {
+        "label": "🧒 Criança (7-8 anos)", "cefr": "Pre-A1 (kids)", "pace": "slow", "kids": True,
+        "guide": "You are talking with a 7-8 year old child who is starting to learn English. Use only very common, "
+                 "concrete words (animals, colors, food, toys, school, family). Max 10 words per reply, very short "
+                 "sentences, present tense. Be playful, warm and encouraging (\"Great job!\", \"Wow!\"). "
+                 "Ask one tiny question at a time, often with two options (\"Do you like cats or dogs?\"). "
+                 "Corrections only for very simple, important mistakes.",
+    },
+    "iniciante": {
+        "label": "🍼 Iniciante (A1)", "cefr": "A1", "pace": "slow",
+        "guide": "The learner is a beginner. Use only very common words and very short sentences (max ~12 words per "
+                 "reply), mostly present simple. Ask one simple question at a time, often yes/no or with two options. "
+                 "Speak about concrete everyday things. Correct only mistakes that change the meaning.",
+    },
     "basico": {
-        "label": "🌱 Básico", "cefr": "A2", "pace": "calm",
-        "guide": "Use very simple, common words and short sentences (max ~20 words per reply). "
-                 "Ask one simple question at a time, often yes/no or either/or. Speak about concrete, everyday things. "
-                 "Correct only mistakes that change the meaning or are very basic.",
+        "label": "🌱 Básico (A2)", "cefr": "A2", "pace": "calm",
+        "guide": "Use simple, common words and short sentences (max ~18 words per reply). Present, past and future "
+                 "with 'going to'; no idioms. Ask one clear question at a time. "
+                 "Correct basic grammar and wrong words.",
     },
     "intermediario": {
-        "label": "🌿 Intermediário", "cefr": "B1", "pace": "normal",
-        "guide": "Use natural everyday English at B1 level, 1-3 sentences (max ~40 words). Avoid rare idioms. "
-                 "Ask open questions that make the learner explain and give reasons. "
-                 "Correct grammar and unnatural word choices.",
+        "label": "🌿 Intermediário (B1)", "cefr": "B1", "pace": "normal",
+        "guide": "Use clear everyday English, 1-2 short sentences (max ~30 words). Prefer common words; if you use a "
+                 "less common word or phrasal verb, keep the sentence simple around it. Ask open questions that make "
+                 "the learner explain and give reasons. Correct grammar and unnatural word choices.",
     },
     "avancado": {
-        "label": "🌳 Avançado", "cefr": "B2-C1", "pace": "brisk",
-        "guide": "Talk like a native speaker at natural speed: phrasal verbs, common idioms, nuanced vocabulary, "
-                 "up to ~60 words per reply. Challenge the learner: ask for opinions, examples and counter-arguments. "
+        "label": "🌳 Avançado (B2+)", "cefr": "B2", "pace": "brisk",
+        "guide": "Talk like a native speaker at natural speed: phrasal verbs, common idioms, up to ~50 words per "
+                 "reply. Ask for opinions, examples and counter-arguments. "
                  "Correct also subtle naturalness issues (collocations, register, word choice).",
     },
 }
-DEFAULT_LEVEL = "intermediario"
+DEFAULT_LEVEL = "basico"
 
 # --- Custos estimados (US$) — conferidos em 24/11/2026; ajuste se os preços mudarem -------
 PRICES = {
@@ -65,3 +79,16 @@ LEARNER_PROFILE = (
 
 # --- Limites -----------------------------------------------------------------
 MAX_HISTORY_TURNS = 30   # quantas falas anteriores vão para o modelo (controla custo)
+
+# --- Modo ao vivo (Gemini Live, só plano grátis — nunca usa OpenAI) -----------------
+LIVE_MODEL = "gemini-3.8-live"
+LIVE_DAILY_MINUTES = 10        # padrão por pessoa (o admin ajusta por usuário)
+LIVE_MAX_SESSION_MIN = 14      # sessões só de áudio têm limite de ~15 min no Gemini
+LIVE_RESET_HOUR_BRT = 5        # a cota grátis do Google renova à meia-noite do Pacífico (~5h em Brasília)
+
+# --- Usuários -----------------------------------------------------------------
+PROVIDERS = ["anthropic", "groq", "gemini", "openai"]
+PROVIDER_LABEL = {"anthropic": "Anthropic (Claude)", "groq": "Groq", "gemini": "Gemini", "openai": "OpenAI"}
+SECRET_NAME = {"anthropic": "ANTHROPIC_API_KEY", "groq": "GROQ_API_KEY",
+               "gemini": "GEMINI_API_KEY", "openai": "OPENAI_API_KEY"}
+DEFAULT_DAILY_TURNS = 60       # limite de falas por dia para usuários convidados (admin ajusta)

@@ -1,87 +1,93 @@
-"""English Practice — parceira de conversação em inglês com voz, correções e resumo."""
+"""English Practice — parceira de conversação em inglês com voz, correções, níveis, modo ao vivo e painel de usuários."""
 
 import base64
+import json
+import uuid
 from datetime import datetime
 
 import streamlit as st
 
 import ui
-from config import DEFAULT_LEVEL, LEVELS, MAX_HISTORY_TURNS
-from prompts import FREE_TALK_OPEN, FREE_TALK_ROLE, SCENARIOS, START_MESSAGE, TOPIC_ROLE, TUTOR_SYSTEM
-from services import db, llm, voice
+from config import (DEFAULT_LEVEL, LEVELS, LIVE_MAX_SESSION_MIN, LIVE_MODEL, LIVE_RESET_HOUR_BRT,
+                    MAX_HISTORY_TURNS, PROVIDER_LABEL, PROVIDERS)
+from prompts import (FREE_TALK_OPEN, FREE_TALK_ROLE, LIVE_SYSTEM, SCENARIOS, START_MESSAGE, TOPIC_ROLE,
+                     TUTOR_SYSTEM)
+from services import db, live, llm, users, voice
 from services.voice_chat import voice_chat
 
-st.set_page_config(page_title="English Practice", page_icon="🗣️", layout="centered")
+st.set_page_config(page_title="English Practice", page_icon="static/favicon.png", layout="centered",
+                   initial_sidebar_state="collapsed")
 ui.inject_css()
+ui.install_app_icons()
 
 
-# --- Acesso (login com Google) ------------------------------------------------
-def check_login() -> bool:
-    """Só deixa entrar quem fizer login com Google e estiver em ALLOWED_EMAILS.
-
-    Sem a seção [auth] nos Secrets (ex.: rodando local), o app abre sem login.
-    """
+# --- Acesso (login com Google + autorização) ---------------------------------------
+def current_email() -> str | None:
+    """E-mail logado. Sem a seção [auth] nos Secrets (rodando local), entra como 'local' (admin)."""
     if "auth" not in st.secrets:
-        return True
+        return "local"
     if not st.user.get("is_logged_in", False):
-        ui.hero("🗣️ English Practice", "Sua parceira de conversação em inglês. Entre com sua conta Google para praticar.")
-        st.button("Entrar com Google", on_click=st.login, type="primary")
-        return False
-    allowed = [e.strip().lower() for e in st.secrets.get("ALLOWED_EMAILS", [])]
-    if allowed and str(st.user.get("email", "")).lower() not in allowed:
-        ui.hero("🗣️ English Practice", "Acesso restrito.")
-        st.error(f"A conta {st.user.get('email')} não tem acesso a este app.")
-        st.button("Sair", on_click=st.logout)
-        return False
-    return True
+        return None
+    return str(st.user.get("email") or "").lower()
 
 
-if not check_login():
+email = current_email()
+if email is None:
+    ui.brand()
+    ui.hero("🗣️ English Practice", "Sua parceira de conversação em inglês. Entre com sua conta Google para praticar.")
+    st.button("Entrar com Google", on_click=st.login, type="primary", width="stretch")
     st.stop()
+
+prof = users.load_profile(email)
+if not prof.allowed:
+    ui.brand()
+    ui.hero("🔒 Acesso restrito", "Esta conta ainda não foi liberada.")
+    st.info(f"Peça ao administrador para liberar **{email}** no painel de usuários.")
+    st.button("Sair", on_click=st.logout)
+    st.stop()
+
+voice.set_keys(prof.keys)  # chaves desta pessoa: a do dono, a própria ou desligada, serviço por serviço
 
 
 # --- Estado -------------------------------------------------------------------
 DEFAULTS = {
-    "started": False,
-    "role": "",
-    "context_label": "",
-    "turns": [],          # [{'role': 'user'|'assistant', 'text', 'correction'?, 'suggestions'?}]
-    "corrections": [],
-    "mic_key": 0,
-    "audio": None,        # (bytes, mime) da última fala da IA
-    "autoplay": False,
-    "summary": None,
-    "voice_used": "",
-    "last_error": "",
-    "session_id": None,
-    "system": "",
+    "started": False, "role": "", "context_label": "", "turns": [], "corrections": [],
+    "mic_key": 0, "audio": None, "autoplay": False, "summary": None, "voice_used": "",
+    "last_error": "", "session_id": None, "system": "", "mode": "maos",
+    "live_token": None, "live_session_key": "", "live_msg": "",
 }
 for k, v in DEFAULTS.items():
     st.session_state.setdefault(k, v if not isinstance(v, list) else list(v))
-# contadores que nunca zeram (o microfone contínuo usa para saber o que é novo)
-st.session_state.setdefault("reply_seq", 0)
+st.session_state.setdefault("reply_seq", 0)       # contadores que nunca zeram
 st.session_state.setdefault("listen_token", 0)
-st.session_state.setdefault("level", DEFAULT_LEVEL)
-st.session_state.setdefault("view", "conversa")
-st.session_state.setdefault("slow_voice", False)   # "voz devagar" fica ligada até você desligar
+st.session_state.setdefault("level", prof.level or DEFAULT_LEVEL)
+st.session_state.setdefault("view", "inicio")
+st.session_state.setdefault("slow_voice", False)
+st.session_state.setdefault("show_text", True)
+st.session_state.setdefault("live_blocked", False)
 ss = st.session_state
-
-
-def user_email() -> str:
-    try:
-        return str(st.user.get("email") or "local")
-    except Exception:
-        return "local"
+if prof.level_locked:
+    ss.level = prof.level
 
 
 def log(**kw) -> None:
     """Registra uma chamada de IA no banco (se configurado)."""
-    db.log_usage(user_email(), ss.session_id, **kw)
+    db.log_usage(email, ss.session_id, **kw)
+
+
+def api_messages() -> list[dict]:
+    """Monta o histórico no formato da API (começa sempre com a mensagem de abertura)."""
+    turns = ss.turns[-MAX_HISTORY_TURNS:]
+    if turns and turns[0]["role"] == "user":
+        turns = turns[1:]
+    msgs = [{"role": "user", "content": START_MESSAGE}]
+    msgs += [{"role": t["role"], "content": t["text"]} for t in turns]
+    return msgs
 
 
 def call_tutor() -> dict:
     try:
-        data = llm.tutor_turn(ss.system, api_messages())
+        data = llm.tutor_turn(ss.system, api_messages(), prof.keys.get("anthropic"))
     except Exception as e:
         log(step="conversa", provider="Anthropic", model=llm.CHAT_MODEL, ok=False, error=str(e)[:500])
         raise
@@ -89,16 +95,6 @@ def call_tutor() -> dict:
     log(step="conversa", provider="Anthropic", model=u.get("model", llm.CHAT_MODEL), ok=True,
         input_tokens=u.get("input_tokens"), output_tokens=u.get("output_tokens"))
     return data
-
-
-def api_messages() -> list[dict]:
-    """Monta o histórico no formato da API (começa sempre com a mensagem de abertura)."""
-    turns = ss.turns[-MAX_HISTORY_TURNS:]
-    if turns and turns[0]["role"] == "user":
-        turns = turns[1:]  # após a abertura (user), a próxima precisa ser do assistant
-    msgs = [{"role": "user", "content": START_MESSAGE}]
-    msgs += [{"role": t["role"], "content": t["text"]} for t in turns]
-    return msgs
 
 
 def set_audio(text: str, pace: str | None = None) -> None:
@@ -123,8 +119,30 @@ def assistant_says(data: dict) -> None:
 def reset_session() -> None:
     next_mic = ss.mic_key + 1
     for k, v in DEFAULTS.items():
+        if k == "mode":
+            continue
         ss[k] = v if not isinstance(v, list) else list(v)
     ss.mic_key = next_mic
+
+
+def turns_left() -> int | None:
+    if prof.daily_turns is None or not db.enabled():
+        return None
+    return max(0, int(prof.daily_turns) - db.turns_today(email))
+
+
+def live_status() -> tuple[bool, str, float]:
+    """(pode usar?, motivo se não puder, segundos já usados hoje)."""
+    used = db.live_seconds_today(email) if db.enabled() else 0.0
+    if not prof.live_enabled:
+        return False, "desativado para esta conta", used
+    if not prof.keys.get("gemini"):
+        return False, "sem chave do Gemini", used
+    if ss.live_blocked or (db.enabled() and db.live_blocked_since_reset(LIVE_RESET_HOUR_BRT)):
+        return False, "a cota grátis do Gemini acabou hoje (renova por volta das 5h)", used
+    if used >= prof.live_daily_minutes * 60:
+        return False, f"seus {prof.live_daily_minutes} minutos de hoje acabaram", used
+    return True, "", used
 
 
 def start_session(role: str, context_label: str) -> None:
@@ -132,8 +150,14 @@ def start_session(role: str, context_label: str) -> None:
     lv = LEVELS[ss.level]
     ss.role, ss.started = role, True
     ss.context_label = f"{context_label} · {lv['label']}"
+    ss.session_id = db.start_session(email, ss.level, ss.context_label + (" · ⚡ ao vivo" if ss.mode == "aovivo" else ""))
+    if ss.mode == "aovivo":
+        ss.system = LIVE_SYSTEM.format(role=role, cefr=lv["cefr"], level_guide=lv["guide"])
+        with st.spinner("Preparando a chamada..."):
+            ss.live_token = live.create_token(prof.keys["gemini"])
+        ss.live_session_key = uuid.uuid4().hex
+        return
     ss.system = TUTOR_SYSTEM.format(role=role, cefr=lv["cefr"], level_guide=lv["guide"])
-    ss.session_id = db.start_session(user_email(), ss.level, ss.context_label)
     with st.spinner("Preparando a conversa..."):
         data = call_tutor()
     assistant_says(data)
@@ -143,12 +167,16 @@ def handle_user(text: str) -> None:
     text = text.strip()
     if not text:
         return
+    left = turns_left()
+    if left is not None and left <= 0:
+        ss.last_error = "Você chegou ao limite de falas de hoje. Volte amanhã! 🙂"
+        return
     ss.turns.append({"role": "user", "text": text})
     try:
         with st.spinner("Pensando..."):
             data = call_tutor()
     except Exception:
-        ss.turns.pop()  # mantém o histórico alternado para a próxima tentativa
+        ss.turns.pop()
         raise
     corr = data.get("correction")
     if corr and corr.get("better") and corr["better"].strip().lower() != text.lower():
@@ -158,13 +186,12 @@ def handle_user(text: str) -> None:
         corr = None
     db.add_turn(ss.session_id, "user", text, corr)
     assistant_says(data)
-    ss.mic_key += 1  # limpa o gravador para a próxima fala
+    ss.mic_key += 1
     if data.get("end_session"):  # você pediu para encerrar falando ("let's stop here")
         finish_session()
 
 
 def handle_audio(audio: bytes, mime: str) -> None:
-    """Transcreve a fala e segue a conversa. Sempre avança o listen_token (sucesso ou falha)."""
     try:
         with st.spinner("Ouvindo..."):
             heard, provider = voice.transcribe(audio, mime, log=log)
@@ -191,89 +218,95 @@ def finish_session() -> None:
         return
     with st.spinner("Montando seu resumo..."):
         try:
-            ss.summary, u = llm.session_summary(transcript_text(), ss.corrections, LEVELS[ss.level]["cefr"])
+            ss.summary, u = llm.session_summary(transcript_text(), ss.corrections, LEVELS[ss.level]["cefr"],
+                                                prof.keys.get("anthropic"))
             log(step="resumo", provider="Anthropic", model=u["model"], ok=True,
                 input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
         except Exception as e:
             log(step="resumo", provider="Anthropic", model=llm.SUMMARY_MODEL, ok=False, error=str(e)[:500])
             ss.summary = "_Não consegui gerar o resumo desta vez._"
-            st.error(f"Erro ao gerar o resumo: {e}")
     db.end_session(ss.session_id, ss.summary)
 
 
-# --- Barra lateral: ajustes -----------------------------------------------------
-with st.sidebar:
-    st.subheader("⚙️ Ajustes")
-    can_listen = voice.can_listen()
-    mode = st.radio(
-        "Modo de conversa",
-        ["🎧 Contínua (mãos livres)", "👆 Apertar para falar"],
-        disabled=not can_listen,
-        help="Contínua: o microfone ouve sozinho e para quando você termina de falar.",
-    )
-    continuous = can_listen and mode.startswith("🎧")
-    ss.slow_voice = st.toggle("🐢 Voz devagar", value=ss.slow_voice,
-                              help="A parceira fala mais devagar em toda a conversa.")
-    show_text = st.toggle("Mostrar texto das respostas", value=True,
-                          help="Desligue para treinar a escuta: o texto fica escondido até você abrir.")
-    if not can_listen:
-        st.info("Sem chave de voz (GROQ, GEMINI ou OPENAI): microfone desligado, só texto.", icon="🎙️")
-    if ss.voice_used:
-        st.caption(ss.voice_used)
-    if ss.started:
-        user_turns = sum(t["role"] == "user" for t in ss.turns)
-        st.caption(f"Falas suas: {user_turns} · Correções: {len(ss.corrections)}")
-    st.divider()
-    if ss.view == "uso":
-        if st.button("💬 Voltar para a conversa", width="stretch"):
-            ss.view = "conversa"
-            st.rerun()
-    elif st.button("📊 Uso e histórico", width="stretch"):
-        ss.view = "uso"
-        st.rerun()
-    if "auth" in st.secrets and st.user.get("is_logged_in", False):
-        st.caption(f"Conectado como {st.user.get('email', '')}")
-        st.button("Sair", on_click=st.logout, width="stretch")
+def handle_live_end(res: dict) -> None:
+    """A chamada ao vivo terminou: guarda a transcrição, registra o tempo e gera o resumo."""
+    secs = float(res.get("seconds") or 0)
+    err = res.get("error") or ""
+    if err == "cota":
+        ss.live_blocked = True
+        log(step="ao vivo", provider="Gemini", model=LIVE_MODEL, ok=False, audio_seconds=secs, error="cota esgotada")
+    elif err:
+        log(step="ao vivo", provider="Gemini", model=LIVE_MODEL, ok=False, audio_seconds=secs, error=str(err)[:500])
+    if secs > 0:
+        log(step="ao vivo", provider="Gemini", model=LIVE_MODEL, ok=True, audio_seconds=secs)
+    for t in res.get("transcript") or []:
+        role = "user" if t.get("role") == "user" else "assistant"
+        text = str(t.get("text") or "").strip()
+        if text:
+            ss.turns.append({"role": role, "text": text})
+            db.add_turn(ss.session_id, role, text)
+    ss.live_token = None
+    if any(t["role"] == "user" for t in ss.turns):
+        finish_session()
+    else:
+        db.end_session(ss.session_id, None)
+        msg = ("A cota grátis do Gemini acabou por hoje — use o modo normal." if err == "cota"
+               else f"A chamada não começou. {('Detalhe: ' + err) if err else ''}")
+        reset_session()
+        ss.live_msg = msg
 
 
-# --- Tela: uso e histórico -------------------------------------------------------
-def usage_view() -> None:
-    ui.hero("📊 Uso e histórico", "Quais IAs foram usadas, quanto custou (estimado) e suas conversas anteriores.")
+# --- Navegação (rodapé) ---------------------------------------------------------
+NAV = {"inicio": "💬 Conversar", "historico": "📊 Histórico", "ajustes": "⚙️ Ajustes"}
+if prof.is_admin:
+    NAV["usuarios"] = "👥 Usuários"
+
+
+def bottom_nav() -> None:
+    def _go():
+        ss.view = ss.nav or "inicio"
+    ss.nav = ss.view
+    with st.bottom:
+        st.segmented_control("Navegação", list(NAV), format_func=lambda k: NAV[k], key="nav",
+                             label_visibility="collapsed", on_change=_go, width="stretch")
+
+
+# --- Tela: histórico -------------------------------------------------------------
+def history_view() -> None:
+    ui.hero("📊 Histórico e uso", "Quais IAs foram usadas, quanto custou (estimado) e suas conversas anteriores.")
     if not db.enabled():
-        st.info("O registro ainda não está ligado. Falta colocar o **DATABASE_URL** (Neon) nos Secrets do app.",
-                icon="🗄️")
+        st.info("O registro não está ligado: falta o **DATABASE_URL** (Neon) nos Secrets do app.", icon="🗄️")
         return
     import pandas as pd
 
+    who = email
+    if prof.is_admin:
+        people = sorted(set(db.known_users()) | {email})
+        who = st.selectbox("Pessoa", people, index=people.index(email))
     days = st.segmented_control("Período", [7, 30, 90], default=30, format_func=lambda d: f"{d} dias") or 30
-    rows = db.usage_by_provider(user_email(), days)
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(db.usage_by_provider(who, days))
     if df.empty:
         st.caption("Nenhum uso registrado ainda neste período.")
     else:
         df["custo_usd"] = df["custo_usd"].astype(float)
-        total = df["custo_usd"].sum()
         openai_calls = int(df.loc[df["servico"] == "OpenAI", "chamadas"].sum())
-        openai_cost = df.loc[df["servico"] == "OpenAI", "custo_usd"].sum()
-        sessions = db.sessions_recent(user_email(), 500)
+        live_min = db.live_seconds_today(who) / 60
         m1, m2, m3 = st.columns(3)
-        m1.metric("Custo estimado", f"US$ {total:.3f}")
+        m1.metric("Custo estimado", f"US$ {df['custo_usd'].sum():.3f}")
         m2.metric("Chamadas à OpenAI", openai_calls, help="A OpenAI só entra quando os serviços grátis falham.")
-        m3.metric("Custo OpenAI", f"US$ {openai_cost:.3f}")
+        m3.metric("Ao vivo hoje", f"{live_min:.1f} min")
         if openai_calls:
-            st.warning(f"A OpenAI (crédito pago) foi usada {openai_calls} vez(es) nos últimos {days} dias. "
-                       "Veja abaixo as falhas que levaram a isso.", icon="💳")
+            st.warning(f"A OpenAI (crédito pago) foi usada {openai_calls} vez(es) nos últimos {days} dias.", icon="💳")
         else:
             st.success("Nenhum uso da OpenAI no período: só serviços grátis e o Claude.", icon="✅")
-        st.markdown("**Por etapa e serviço**")
         st.dataframe(df, hide_index=True, width="stretch")
     with st.expander("🕒 Últimas chamadas (inclui falhas e trocas de serviço)"):
-        st.dataframe(pd.DataFrame(db.usage_recent(user_email())), hide_index=True, width="stretch")
-    st.caption("Custos são estimativas pela tabela de preços do app. Valores oficiais: "
-               "platform.claude.com (Anthropic) e platform.openai.com/usage (OpenAI).")
+        st.dataframe(pd.DataFrame(db.usage_recent(who)), hide_index=True, width="stretch")
+    st.caption("Custos estimados pela tabela de preços do app. Valores oficiais: platform.claude.com e "
+               "platform.openai.com/usage. O Gemini ao vivo roda no plano grátis.")
 
     st.markdown("### 🗂️ Conversas anteriores")
-    sess = db.sessions_recent(user_email())
+    sess = db.sessions_recent(who)
     if not sess:
         st.caption("Nenhuma conversa registrada ainda.")
         return
@@ -287,7 +320,6 @@ def usage_view() -> None:
             ui.user_bubble(t["text"])
             c = t.get("correction")
             if isinstance(c, str):
-                import json
                 c = json.loads(c)
             if c:
                 ui.correction(c.get("better", ""), c.get("tip_pt", ""))
@@ -296,23 +328,158 @@ def usage_view() -> None:
             st.markdown(chosen["summary"])
 
 
-if ss.view == "uso":
-    usage_view()
+# --- Tela: ajustes ---------------------------------------------------------------
+def settings_view() -> None:
+    ui.hero("⚙️ Ajustes", "Do seu jeito: voz, texto e sua conta.")
+    ss.slow_voice = st.toggle("🐢 Voz devagar", value=ss.slow_voice, help="A parceira fala mais devagar sempre.")
+    ss.show_text = st.toggle("👀 Mostrar texto das respostas", value=ss.show_text,
+                             help="Desligue para treinar a escuta: o texto fica escondido até você abrir.")
+    st.divider()
+    st.markdown(f"**Conta:** {email}" + (" · administrador" if prof.is_admin else ""))
+    lv = LEVELS.get(prof.level or "", None)
+    left = turns_left()
+    ok, why, used = live_status()
+    st.markdown(
+        f"- Nível: **{lv['label'] if lv else 'livre'}**{' (definido pelo administrador)' if prof.level_locked else ''}\n"
+        f"- Falas hoje: **{'sem limite' if left is None else f'{left} restantes'}**\n"
+        f"- Ao vivo: **{f'{max(0, prof.live_daily_minutes - used / 60):.0f} de {prof.live_daily_minutes} min hoje' if ok else why}**"
+    )
+    with st.expander("📲 Instalar no celular e no Mac"):
+        st.markdown(
+            "- **iPhone (Safari):** Compartilhar → *Adicionar à Tela de Início*.\n"
+            "- **Mac (Safari):** Arquivo → *Adicionar ao Dock*. **Chrome:** menu ⋮ → *Transmitir, salvar e "
+            "compartilhar* → *Instalar página como app*.\n"
+            "- Abrindo pelo ícone, o app aparece sem barras do navegador."
+        )
+    if "auth" in st.secrets:
+        st.button("Sair da conta", on_click=st.logout, width="stretch")
+
+
+# --- Tela: usuários (administrador) ------------------------------------------------
+def users_view() -> None:
+    ui.hero("👥 Usuários", "Libere pessoas, escolha o nível delas, o limite por dia e quais chaves de API usam.")
+    if not db.enabled():
+        st.info("Precisa do banco (DATABASE_URL) ligado para cadastrar usuários.", icon="🗄️")
+        return
+    import pandas as pd
+
+    rows = db.list_users()
+    if rows:
+        view = [{
+            "e-mail": r["email"], "ativo": r["active"], "nível": LEVELS.get(r["level"] or "", {}).get("label", "livre"),
+            "travado": r["level_locked"], "falas/dia": r["daily_turns"] if r["daily_turns"] is not None else "padrão",
+            "ao vivo": f"{r['live_daily_minutes'] or 10} min" if r["live_enabled"] else "não",
+            "chaves": ", ".join(f"{PROVIDER_LABEL[p].split(' ')[0]}: {users.POLICIES.get((r['key_policy'] or {}).get(p, 'owner'))}"
+                                for p in PROVIDERS),
+        } for r in rows if not r.get("is_admin")]
+        if view:
+            st.dataframe(pd.DataFrame(view), hide_index=True, width="stretch")
+    st.caption("Lembrete: se o login do Google estiver em modo de teste, adicione o e-mail também como "
+               "usuário de teste no Google Cloud (Google Auth Platform → Público-alvo).")
+
+    existing = [r["email"] for r in rows if not r.get("is_admin")]
+    pick = st.selectbox("Editar", ["➕ Novo usuário"] + existing)
+    cur = next((r for r in rows if r["email"] == pick), {}) if pick != "➕ Novo usuário" else {}
+    with st.form("user_form", clear_on_submit=False):
+        em = st.text_input("E-mail Google", value=cur.get("email", ""), disabled=bool(cur))
+        name = st.text_input("Nome (opcional)", value=cur.get("name") or "")
+        active = st.toggle("Acesso liberado", value=cur.get("active", True))
+        level_opts = ["(livre)"] + list(LEVELS)
+        lv_cur = cur.get("level") or "(livre)"
+        lvl = st.selectbox("Nível", level_opts, index=level_opts.index(lv_cur) if lv_cur in level_opts else 0,
+                           format_func=lambda k: k if k == "(livre)" else LEVELS[k]["label"])
+        locked = st.checkbox("Travar o nível (a pessoa não pode trocar)", value=bool(cur.get("level_locked")))
+        turns = st.number_input("Limite de falas por dia (0 = sem limite)", min_value=0, max_value=1000,
+                                value=int(cur["daily_turns"]) if cur.get("daily_turns") is not None else 60)
+        live_on = st.toggle("Pode usar o modo ao vivo (Gemini grátis)", value=bool(cur.get("live_enabled")))
+        live_min = st.number_input("Minutos ao vivo por dia", min_value=1, max_value=60,
+                                   value=int(cur.get("live_daily_minutes") or 10))
+        st.markdown("**Chaves de API, serviço por serviço**")
+        policy = dict(cur.get("key_policy") or {})
+        enc = dict(cur.get("keys_enc") or {})
+        new_keys = {}
+        for p in PROVIDERS:
+            c1, c2 = st.columns([1.2, 2])
+            pol_opts = list(users.POLICIES)
+            policy[p] = c1.selectbox(PROVIDER_LABEL[p], pol_opts, index=pol_opts.index(policy.get(p, "owner")),
+                                     format_func=lambda k: users.POLICIES[k], key=f"pol_{p}_{pick}")
+            hint = users.mask(users.decrypt(enc[p])) if enc.get(p) else "nenhuma"
+            new_keys[p] = c2.text_input(f"Chave própria ({PROVIDER_LABEL[p]}) — atual: {hint}", type="password",
+                                        key=f"key_{p}_{pick}", help="Só é usada se escolher 'Chave própria'. "
+                                                             "Deixe em branco para manter a atual.")
+        saved = st.form_submit_button("💾 Salvar usuário", type="primary", width="stretch")
+    if saved:
+        target = (cur.get("email") or em or "").strip().lower()
+        if "@" not in target:
+            st.error("Informe um e-mail válido.")
+        else:
+            for p, k in new_keys.items():
+                if k.strip():
+                    enc[p] = users.encrypt(k.strip())
+            db.upsert_user(target, name=name or None, active=active, level=None if lvl == "(livre)" else lvl,
+                           level_locked=locked and lvl != "(livre)", daily_turns=None if turns == 0 else int(turns),
+                           live_enabled=live_on, live_daily_minutes=int(live_min), key_policy=policy, keys_enc=enc)
+            st.success(f"Salvo: {target}")
+            st.rerun()
+    if cur and st.button(f"🗑️ Remover {cur['email']}", width="stretch"):
+        db.delete_user(cur["email"])
+        st.rerun()
+
+    st.divider()
+    my = db.get_user(email) or {}
+    mine = st.number_input("Meus minutos ao vivo por dia", min_value=1, max_value=60,
+                           value=int(my.get("live_daily_minutes") or prof.live_daily_minutes), key="my_live_min")
+    if st.button("Salvar meus minutos"):
+        db.upsert_user(email, is_admin=True, active=True, live_daily_minutes=int(mine))
+        st.success("Salvo.")
+
+
+# --- Roteamento das telas sem conversa ativa -----------------------------------------------
+if not ss.started and ss.view != "inicio":
+    {"historico": history_view, "ajustes": settings_view, "usuarios": users_view}.get(ss.view, history_view)()
+    bottom_nav()
     st.stop()
 
 
-# --- Tela inicial: escolher o cenário ------------------------------------------
+# --- Tela inicial: escolher nível, modo e cenário ------------------------------------
 if not ss.started:
-    ui.hero("🗣️ English Practice",
-            "Escolha o nível e o cenário, toque em começar e converse. Ela responde e te ajuda a soar mais natural.")
-    ss.level = st.pills("Nível", list(LEVELS), format_func=lambda k: f"{LEVELS[k]['label']} ({LEVELS[k]['cefr']})",
-                        default=ss.level, selection_mode="single", key="level_pick") or ss.level
-    scen_key = st.pills("Cenário", list(SCENARIOS), format_func=lambda k: SCENARIOS[k]["label"],
-                        default="dia_a_dia", selection_mode="single") or "dia_a_dia"
+    ui.brand()
+    ui.hero("Pronto para conversar?", "Escolha o nível, o modo e o assunto. Ela responde e te ajuda a soar mais natural.")
+    if ss.live_msg:
+        st.info(ss.live_msg, icon="⚡")
+        ss.live_msg = ""
+
+    if prof.level_locked:
+        st.markdown(f"**Nível:** {LEVELS[ss.level]['label']}")
+    else:
+        ss.level = st.pills("Nível", list(LEVELS), format_func=lambda k: LEVELS[k]["label"],
+                            default=ss.level, selection_mode="single", key="level_pick") or ss.level
+
+    live_ok, live_why, live_used = live_status()
+    modes = {"maos": "🎧 Mãos livres", "apertar": "👆 Apertar para falar"}
+    if live_ok:
+        modes["aovivo"] = "⚡ Ao vivo"
+    if not voice.can_listen():
+        modes = {"texto": "⌨️ Só texto"}
+    if ss.mode not in modes:
+        ss.mode = list(modes)[0]
+    ss.mode = st.pills("Modo", list(modes), format_func=lambda k: modes[k], default=ss.mode,
+                       selection_mode="single", key="mode_pick") or ss.mode
+    if live_ok:
+        st.caption(f"⚡ Ao vivo: {max(0, prof.live_daily_minutes - live_used / 60):.0f} de "
+                   f"{prof.live_daily_minutes} min hoje · Gemini grátis")
+    elif prof.live_enabled:
+        st.caption(f"⚡ Ao vivo indisponível: {live_why}.")
+
+    kids = LEVELS[ss.level].get("kids")
+    scen_keys = ["criancas"] if kids else [k for k in SCENARIOS if k != "criancas"]
+    scen_key = st.pills("Cenário", scen_keys, format_func=lambda k: SCENARIOS[k]["label"],
+                        default=scen_keys[0], selection_mode="single", key=f"scen_{int(bool(kids))}") or scen_keys[0]
     scen = SCENARIOS[scen_key]
     if scen["situations"]:
         situation = st.pills("Assunto" if scen_key == "assuntos" else "Situação", list(scen["situations"]),
-                             selection_mode="single", default=list(scen["situations"])[0]) or list(scen["situations"])[0]
+                             selection_mode="single", default=list(scen["situations"])[0],
+                             key=f"sit_{scen_key}") or list(scen["situations"])[0]
         role = scen["situations"][situation]
         if scen_key == "assuntos":
             role = TOPIC_ROLE.format(topic=role)
@@ -323,34 +490,55 @@ if not ss.started:
         role = FREE_TALK_ROLE.format(topic=topic) if topic.strip() else FREE_TALK_OPEN
         context_label = f"{scen['label']} · {topic or 'você escolhe na conversa'}"
 
-    if st.button("▶️ Começar conversa", type="primary", width="stretch"):
+    left = turns_left()
+    if left is not None:
+        st.caption(f"Falas restantes hoje: {left}")
+    blocked = left is not None and left <= 0
+    if blocked:
+        st.warning("Você chegou ao limite de falas de hoje. Volte amanhã! 🙂")
+    if st.button("▶️ Começar conversa", type="primary", width="stretch", disabled=blocked):
         try:
             start_session(role, context_label)
             st.rerun()
         except Exception as e:
             st.error(f"Erro ao iniciar: {e}")
-
-    with st.expander("Como funciona"):
-        st.markdown(
-            "- 🎧 **Modo contínuo**: toque no microfone uma vez e converse. Ele para sozinho quando você termina de "
-            "falar e volta a ouvir depois da resposta. Toque de novo para **pausar** e pensar.\n"
-            "- ✏️ Quando algo puder soar mais natural, aparece uma **dica amarela** embaixo da sua fala.\n"
-            "- 🆘 Travou? Abra **Ideias de resposta**. 🐢 **Falar devagar** fica ligado até você desligar.\n"
-            "- 🏁 Para terminar, toque em **Encerrar** ou simplesmente diga *\"let's stop here\"*. "
-            "Você recebe o resumo com seus erros recorrentes.\n"
-            "- 📊 Em **Uso e histórico** (barra lateral) você vê quais IAs foram usadas, o custo e as conversas antigas."
-        )
+            if ss.mode == "aovivo":
+                ss.mode = "maos"
+                reset_session()
+    bottom_nav()
     st.stop()
 
 
-# --- Conversa -----------------------------------------------------------------
-ui.pill(ss.context_label)
+# --- Conversa ao vivo ------------------------------------------------------------------
+if ss.mode == "aovivo" and not ss.summary:
+    ui.pill(ss.context_label + " · ⚡ ao vivo")
+    ok, why, used = live_status()
+    res = live.live_call(ss.live_token or "", ss.system, used_seconds=used,
+                         max_seconds=prof.live_daily_minutes * 60,
+                         session_max_seconds=LIVE_MAX_SESSION_MIN * 60, session_key=ss.live_session_key)
+    st.caption("Dica: use fone de ouvido. A transcrição e o resumo aparecem quando a chamada terminar.")
+    if res:
+        handle_live_end(res)
+        st.rerun()
+    st.stop()
 
+
+# --- Conversa (mãos livres / apertar para falar / texto) ---------------------------------
+h1, h2 = st.columns([5, 1], vertical_alignment="center")
+with h1:
+    ui.pill(ss.context_label)
+with h2.popover("⚙️", width="stretch"):
+    ss.slow_voice = st.toggle("🐢 Voz devagar", value=ss.slow_voice, key="pop_slow")
+    ss.show_text = st.toggle("👀 Mostrar texto", value=ss.show_text, key="pop_text")
+    if ss.voice_used:
+        st.caption(ss.voice_used)
+
+continuous = ss.mode == "maos" and voice.can_listen()
 last_ai = max((i for i, t in enumerate(ss.turns) if t["role"] == "assistant"), default=-1)
 
 for i, t in enumerate(ss.turns):
     if t["role"] == "assistant":
-        hide = not show_text and i == last_ai and not ss.summary
+        hide = not ss.show_text and i == last_ai and not ss.summary
         ui.ai_bubble(t["text"], hidden=hide)
         if i == last_ai:
             if hide:
@@ -380,10 +568,10 @@ for i, t in enumerate(ss.turns):
         if c:
             ui.correction(c["better"], c["tip_pt"])
 
-ss.autoplay = False  # toca só uma vez; reruns seguintes não repetem o áudio
+ss.autoplay = False
 
-# --- Resumo (conversa encerrada: microfone desligado) -----------------------------
-if ss.summary:
+
+def summary_block() -> None:
     st.divider()
     st.subheader("📋 Resumo da sessão")
     with st.container(border=True):
@@ -396,20 +584,25 @@ if ss.summary:
     if d2.button("✅ Concluir e voltar ao início", type="primary", width="stretch"):
         reset_session()
         st.rerun()
+
+
+if ss.summary:
+    summary_block()
     st.stop()
 
-# --- Entrada (rodapé fixo: microfone + encerrar + texto, sempre visíveis) -----------
+
+# --- Entrada (rodapé fixo: microfone + encerrar + texto) ------------------------------
 if ss.last_error:
     st.warning(ss.last_error, icon="⚠️")
 
 utter = rec = None
-with st._bottom:
+with st.bottom:
     m1, m2 = st.columns([4, 1.3], vertical_alignment="center")
     with m1:
         if continuous:
             audio_b64 = base64.b64encode(ss.audio[0]).decode() if ss.audio else None
             utter = voice_chat(ss.reply_seq, audio_b64, ss.audio[1] if ss.audio else None, ss.listen_token)
-        elif can_listen:
+        elif ss.mode == "apertar" and voice.can_listen():
             rec = st.audio_input("🎙️ Grave sua resposta", key=f"mic_{ss.mic_key}", label_visibility="collapsed")
     end_clicked = m2.button("🏁 Encerrar", key="end_bottom", width="stretch",
                             help="Encerra a conversa, desliga o microfone e mostra o resumo.")

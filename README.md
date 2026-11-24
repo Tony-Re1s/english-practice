@@ -4,7 +4,8 @@ Parceira de conversação em inglês (nível B1) com voz, correções curtas a c
 
 ## O que tem
 - **4 cenários**: Dia a dia, Trabalho, Intercâmbio/viagem e Conversa livre (você escolhe o assunto). 15 situações prontas de role-play.
-- **Voz nos dois sentidos**: você grava a resposta, ela responde falando. Botão **🐢 Ouvir devagar**.
+- **Conversa contínua (mãos livres)**: toque no microfone uma vez; ele para sozinho quando você termina de falar, toca a resposta e volta a ouvir. Toque de novo para pausar. Também há o modo **Apertar para falar**.
+- **Voz nos dois sentidos** com botão **🐢 Ouvir devagar**.
 - **Voz com reserva**: ouvir usa Groq → Gemini → OpenAI; falar usa Edge (grátis) → Gemini → OpenAI → gTTS. Só cai no pago se o grátis falhar.
 - **Treino de escuta**: desligue "Mostrar texto das respostas" e o texto só aparece se você abrir.
 - **✏️ Dica a cada fala**: versão mais natural da sua frase + explicação curta em português.
@@ -13,7 +14,9 @@ Parceira de conversação em inglês (nível B1) com voz, correções curtas a c
 
 ## Estrutura
 ```
-app.py               # interface Streamlit
+app.py               # fluxo do app
+ui.py                # visual: cores, balões de conversa
+services/voice_chat.py  # microfone mãos-livres (componente no navegador)
 config.py            # modelos, voz, velocidade, nível — mude aqui
 prompts.py           # cenários, situações e prompts do tutor
 services/llm.py      # Claude (conversa, correções, resumo)

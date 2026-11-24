@@ -51,28 +51,36 @@ def _gemini():
 
 
 # --- Ouvir ---------------------------------------------------------------------
-def _stt_groq(audio: bytes) -> str:
+EXT = {"audio/wav": "wav", "audio/x-wav": "wav", "audio/webm": "webm", "audio/mp4": "mp4",
+       "audio/mpeg": "mp3", "audio/ogg": "ogg", "audio/aac": "aac"}
+
+
+def _fname(mime: str) -> str:
+    return "speech." + EXT.get(mime, "webm")
+
+
+def _stt_groq(audio: bytes, mime: str) -> str:
     r = _groq().audio.transcriptions.create(
-        model=GROQ_STT_MODEL, file=("speech.wav", audio), language="en")
+        model=GROQ_STT_MODEL, file=(_fname(mime), audio), language="en")
     return r.text
 
 
-def _stt_gemini(audio: bytes) -> str:
+def _stt_gemini(audio: bytes, mime: str) -> str:
     from google.genai import types
     r = _gemini().models.generate_content(
         model=GEMINI_STT_MODEL,
         contents=[
             "Transcribe this English speech exactly as spoken. "
             "Return only the transcript, without comments. Keep the speaker's mistakes.",
-            types.Part.from_bytes(data=audio, mime_type="audio/wav"),
+            types.Part.from_bytes(data=audio, mime_type=mime),
         ],
     )
     return r.text or ""
 
 
-def _stt_openai(audio: bytes) -> str:
+def _stt_openai(audio: bytes, mime: str) -> str:
     r = _openai().audio.transcriptions.create(
-        model=OPENAI_STT_MODEL, file=("speech.wav", audio), language="en")
+        model=OPENAI_STT_MODEL, file=(_fname(mime), audio), language="en")
     return r.text
 
 
@@ -83,14 +91,14 @@ STT_CHAIN = [
 ]
 
 
-def transcribe(audio: bytes) -> tuple[str, str]:
+def transcribe(audio: bytes, mime: str = "audio/wav") -> tuple[str, str]:
     """Retorna (texto, provedor_usado)."""
     errors = []
     for name, key, fn in STT_CHAIN:
         if not _key(key):
             continue
         try:
-            text = (fn(audio) or "").strip()
+            text = (fn(audio, mime) or "").strip()
             if text:
                 return text, name
             errors.append(f"{name}: vazio")

@@ -144,6 +144,18 @@ def assistant_says(data: dict) -> None:
     set_audio(data["reply"])
 
 
+def undo_last_exchange() -> None:
+    """O app entendeu errado: tira a última fala do aluno e a resposta, e a parceira repete a pergunta anterior."""
+    if len(ss.turns) >= 2 and ss.turns[-1]["role"] == "assistant" and ss.turns[-2]["role"] == "user":
+        ss.turns.pop()
+        wrong = ss.turns.pop()
+        if wrong.get("correction") and ss.corrections and ss.corrections[-1] == wrong["correction"]:
+            ss.corrections.pop()
+        prev = next((t for t in reversed(ss.turns) if t["role"] == "assistant"), None)
+        if prev:
+            set_audio(prev["text"])
+
+
 def reset_session() -> None:
     next_mic = ss.mic_key + 1
     for k, v in DEFAULTS.items():
@@ -222,7 +234,12 @@ def handle_user(text: str) -> None:
 def handle_audio(audio: bytes, mime: str) -> None:
     try:
         with st.spinner("Ouvindo..."):
-            heard, provider = voice.transcribe(audio, mime, log=log)
+            # contexto: a última fala da parceira + as sugestões → o reconhecimento erra bem menos
+            last = next((t for t in reversed(ss.turns) if t["role"] == "assistant"), None)
+            ctx = ""
+            if last:
+                ctx = last["text"] + " " + " ".join(last.get("suggestions") or [])
+            heard, provider = voice.transcribe(audio, mime, log=log, context=ctx)
         ss.voice_used = f"ouvido por: {provider}"
         ss.last_error = ""
         handle_user(heard)
@@ -1222,6 +1239,10 @@ for i, t in enumerate(ss.turns):
         c = t.get("correction")
         if c:
             ui.correction(c["better"], c["tip_pt"])
+        if i == last_ai - 1 and not ss.summary and st.button("↩️ Não foi isso que eu disse", key=f"undo_{i}",
+                                                              help="Apaga esta fala e a resposta; é só falar de novo."):
+            undo_last_exchange()
+            st.rerun()
 
 ss.autoplay = False
 

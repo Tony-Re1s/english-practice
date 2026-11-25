@@ -9,7 +9,7 @@ SUMMARY_MAX_TOKENS = 1500
 
 # --- Voz (ordem de tentativa em services/voice.py: grátis primeiro) -----------
 # Ouvir sua fala
-GROQ_STT_MODEL = "whisper-large-v3-turbo"      # grátis (precisa GROQ_API_KEY)
+GROQ_STT_MODEL = "whisper-large-v3"            # grátis (precisa GROQ_API_KEY); o modelo completo erra menos com sotaque que o "turbo"
 GEMINI_STT_MODEL = "gemini-3.8-flash"          # precisa GEMINI_API_KEY
 OPENAI_STT_MODEL = "gpt-4o-mini-transcribe"    # pago; a OpenAI desliga em 26/02/2027 → trocar por "gpt-transcribe"
 

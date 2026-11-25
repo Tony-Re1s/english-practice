@@ -98,10 +98,14 @@ EXERCISE_TOOL = {
                     "type": "object",
                     "properties": {
                         "type": {"type": "string", "enum": ["mc", "fill"]},
-                        "prompt": {"type": "string", "description": "The question. For 'fill', use ___ for the gap."},
+                        "instruction_pt": {"type": "string", "description": "Exactly what to do, in Brazilian Portuguese, "
+                                           "short (e.g. 'Escreva o passado de GO (1 palavra).' or 'Escolha a frase correta.')."},
+                        "prompt": {"type": "string", "description": "The question. For 'fill': ONE sentence with exactly ONE "
+                                   "gap written ___ (never two gaps); put the base word in brackets when needed, e.g. "
+                                   "'She ___ (go) to bed early.'"},
                         "options": {"type": "array", "items": {"type": "string"}, "description": "For 'mc': 3 or 4 options."},
                         "answer": {"type": "string", "description": "Correct option text (mc) or the word(s) for the gap (fill)."},
-                        "accept": {"type": "array", "items": {"type": "string"}, "description": "Other accepted answers (fill), e.g. contractions."},
+                        "accept": {"type": "array", "items": {"type": "string"}, "description": "ALL other correct answers for the gap (fill): contractions and full forms (didn't / did not), British/American spellings."},
                         "explain_pt": {"type": "string", "description": "One short sentence in Portuguese explaining the answer."},
                     },
                     "required": ["type", "prompt", "answer", "explain_pt"],
@@ -123,7 +127,10 @@ def make_exercise(level_guide: str, cefr: str, topic: str, rnd: int, api_key: st
             + "Create the exercise with exactly 6 questions (mix 'mc' and 'fill'). For 'fill', the gap answer must be "
               "short and unambiguous. Each question must have exactly ONE correct answer: in 'mc', every wrong "
               "option must contain a clear grammar error (never two acceptable options that differ only in extra "
-              "words). Before answering, check each question yourself.")
+              "words). Rules for 'fill': exactly ONE gap ___ per sentence; the answer is ONLY what goes in that gap "
+              "(1-3 words); instruction_pt says exactly what to type and how many words; list every other correct "
+              "form in 'accept'. Never write instructions like 'write the missing word for the gap in ...' that "
+              "point to another sentence. Before answering, check each question yourself.")
     data, usage = _tool_call(system, user, EXERCISE_TOOL, api_key)
     data["questions"] = [q for q in data.get("questions", []) if q.get("prompt") and q.get("answer")][:8]
     return data, usage
@@ -202,7 +209,9 @@ def make_kids_exercise(level_guide: str, topic: str, rnd: int, api_key: str | No
                if num else "")
             + "Create the mission with exactly 6 questions. Each question must have exactly ONE correct answer, and "
               "every wrong option must be clearly wrong. Prefer 'mc' with emojis that show the meaning. 'fill' answers "
-              "must be one or two easy words already shown in the examples. Check each question yourself.")
+              "must be one or two easy words already shown in the examples, with exactly ONE gap ___, and instruction_pt "
+              "must say exactly what to write (e.g. 'Escreva a palavra que falta: 1 palavra'). List other correct "
+              "spellings in 'accept'. Check each question yourself.")
     data, usage = _tool_call(system, user, KIDS_EXERCISE_TOOL, api_key, max_tokens=2200)
     data["questions"] = [q for q in data.get("questions", []) if q.get("answer")][:8]
     data["kids"] = True
@@ -227,18 +236,49 @@ def _dist(a: str, b: str) -> int:
     return prev[-1]
 
 
+_HELPERS = {"did", "do", "does", "you", "i", "he", "she", "it", "we", "they", "the", "a", "an", "to", "not",
+            "didn't", "don't", "doesn't", "is", "are", "was", "were", "am"}
+
+
+def _words(s: str) -> list[str]:
+    """Palavras sem as aspas das pontas ('did you' → did, you), mantendo contrações como didn't."""
+    return [w.strip("'") for w in re.findall(r"[a-z0-9']+", _norm(s)) if w.strip("'")]
+
+
 def check_answer(q: dict, given: str | None, lenient: bool = False) -> bool:
-    """lenient (modo infantil): aceita um errinho de digitação em palavras de 4+ letras (ex.: 'bannana')."""
+    """Corrige com bom senso: ignora maiúsculas, pontuação e apóstrofo diferente; aceita a resposta escrita dentro
+    de uma frase (ex.: 'She went', 'did have') quando as outras palavras já estão na própria pergunta.
+    lenient (modo infantil): aceita também um errinho de digitação em palavras de 4+ letras (ex.: 'bannana')."""
     if given is None:
         return False
     ok = {_norm(q.get("answer"))} | {_norm(a) for a in (q.get("accept") or [])}
+    ok.discard("")
     g = _norm(given)
     if g in ok:
         return True
-    if lenient and q.get("type") == "fill":
+    if q.get("type") != "fill" or not g:
+        return False
+    gw = _words(given)
+    context = set(_words(q.get("prompt", ""))) | _HELPERS
+    for a in ok:
+        aw = _words(a)
+        if not aw:
+            continue
+        for i in range(len(gw) - len(aw) + 1):   # a resposta aparece inteira, e o resto veio da própria pergunta
+            if gw[i:i + len(aw)] == aw and all(w in context for w in gw[:i] + gw[i + len(aw):]):
+                return True
+    if lenient:
         g2 = g.replace(" ", "")
         return any(len(a) >= 4 and _dist(g2, a.replace(" ", "")) <= 1 for a in ok)
     return False
+
+
+def fill_hint(q: dict) -> str:
+    """Orientação para perguntas de escrever: o que digitar e quantas palavras (vale para exercícios antigos também)."""
+    if q.get("instruction_pt"):
+        return q["instruction_pt"]
+    n = max(1, len(_words(q.get("answer", ""))))
+    return f"✍️ Escreva só o que vai na lacuna ({n} {'palavra' if n == 1 else 'palavras'})."
 
 
 # --- Vídeos -------------------------------------------------------------------------------

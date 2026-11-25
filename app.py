@@ -1499,7 +1499,9 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
             galaxy.mascot("Great job! ⭐", f"Isso mesmo! {q.get('explain_pt', '')}", party=True, key=f"kp_fb_{num}_{i}",
                           hat=hat)
         else:
-            galaxy.mascot("Oops! Let's learn it 💡", f"A resposta é: {q['answer']}. {q.get('explain_pt', '')}",
+            given = str(stt["ans"].get(i) or "").strip()
+            galaxy.mascot("Oops! Let's learn it 💡", (f"Você escreveu “{given}”. " if given and q.get("type") == "fill" else "")
+                          + f"A resposta é: {q['answer']}. {q.get('explain_pt', '')}",
                           key=f"kp_fb_{num}_{i}", oops=True, hat=hat)
         last = i == len(qs)
         if st.button("🏁 Ver resultado" if last else "🚀 Próxima parada", type="primary", width="stretch",
@@ -1533,7 +1535,7 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
         if st.button("💡 Me dá uma dica", key=f"kp_tip_{num}_{i}"):
             st.info("Começa assim: **" + " ".join(w[0] + " _" * (len(w) - 1) for w in ans_words.split()) + "**", icon="💡")
         with st.form(f"kp_fill_{num}_{i}"):
-            typed = st.text_input("Escreva a resposta em inglês ✍️", key=f"kp_in_{num}_{i}")
+            typed = st.text_input(learn.fill_hint(q), key=f"kp_in_{num}_{i}", placeholder="Escreva em inglês ✍️")
             if st.form_submit_button("🚀 Confirmar", type="primary", width="stretch") and typed.strip():
                 answer(typed)
 
@@ -1599,9 +1601,14 @@ def grammar_tab(lvl: str) -> None:
         answers = {}
         for i, q in enumerate(qs):
             if q.get("type") == "mc" and q.get("options"):
+                if q.get("instruction_pt"):
+                    st.caption(q["instruction_pt"])
                 answers[i] = st.radio(f"{i + 1}. {q['prompt']}", q["options"], index=None, key=f"q_{key}_{i}")
             else:
-                answers[i] = st.text_input(f"{i + 1}. {q['prompt']}", key=f"q_{key}_{i}")
+                if q.get("instruction_pt") and q.get("type") == "mc":
+                    st.caption(q["instruction_pt"])
+                answers[i] = st.text_input(f"{i + 1}. {q['prompt']}", key=f"q_{key}_{i}",
+                                           placeholder=learn.fill_hint(q))
         sent = st.form_submit_button("✅ Corrigir", type="primary", width="stretch")
     if sent:
         score = 0
@@ -1611,7 +1618,9 @@ def grammar_tab(lvl: str) -> None:
             if ok:
                 st.markdown(f"✅ **{i + 1}.** Certo! {q.get('explain_pt', '')}")
             else:
-                st.markdown(f"❌ **{i + 1}.** Resposta: **{q['answer']}** — {q.get('explain_pt', '')}")
+                given = (answers.get(i) or "").strip()
+                mine = f"Você escreveu: *{given}* · " if given else "Sem resposta · "
+                st.markdown(f"❌ **{i + 1}.** {mine}Resposta: **{q['answer']}** — {q.get('explain_pt', '')}")
         db.exercise_done(email, lvl, num, score, len(qs), {str(k): v for k, v in answers.items()})
         if kids:
             n_st = galaxy.stars_for(score, len(qs))

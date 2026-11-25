@@ -330,6 +330,24 @@ def set_pref(user_email: str, key: str, value: str) -> None:
             on conflict (user_email, key) do update set value = excluded.value""", (user_email, key, value))
 
 
+def pref_all(key: str) -> dict:
+    """{pessoa: valor} de uma preferência para todo mundo (ex.: recorde do desafio, avatar)."""
+    rows = _run("select user_email, value from ep_prefs where key = %s", (key,), fetch=True)
+    return {r["user_email"]: r["value"] for r in rows}
+
+
+def week_activity() -> dict:
+    """Atividade de todo mundo desde segunda-feira (horário de Brasília), para a Corrida Espacial."""
+    wk = "date_trunc('week', now() at time zone 'America/Sao_Paulo') at time zone 'America/Sao_Paulo'"
+    ex = _run(f"""select user_email, level, num, max(score) as score, max(total) as total from ep_exercise_done
+                  where ts >= {wk} group by user_email, level, num""", fetch=True)
+    vids = _run(f"select user_email, count(*) as n from ep_video_done where ts >= {wk} group by user_email", fetch=True)
+    talk = _run(f"""select s.user_email, count(t.*) as n from ep_sessions s join ep_turns t on t.session_id = s.id
+                    where t.role = 'user' and s.started_at >= {wk} group by s.user_email""", fetch=True)
+    return {"exercises": ex, "videos": {r["user_email"]: r["n"] for r in vids},
+            "turns": {r["user_email"]: r["n"] for r in talk}}
+
+
 # --- séries de vídeos (admin) ------------------------------------------------------------
 def series_summary() -> list[dict]:
     return _run("""select coalesce(series, 'Avulsos') as series, mode() within group (order by level) as level, count(*) as n
@@ -353,8 +371,9 @@ def kid_days(user_email: str, level: str) -> list:
 
 
 def kid_today_nums(user_email: str, level: str) -> set:
-    rows = _run("""select distinct num from ep_exercise_done where user_email = %s and level = %s
-                   and (ts at time zone 'America/Sao_Paulo')::date = (now() at time zone 'America/Sao_Paulo')::date""",
+    # só planetas NOVOS de hoje (refazer um planeta antigo não conta no limite do dia)
+    rows = _run("""select num from ep_exercise_done where user_email = %s and level = %s group by num
+                   having (min(ts) at time zone 'America/Sao_Paulo')::date = (now() at time zone 'America/Sao_Paulo')::date""",
                 (user_email, level), fetch=True)
     return {r["num"] for r in rows}
 

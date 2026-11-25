@@ -14,7 +14,7 @@ from config import (DEFAULT_LEVEL, LEVELS, LIVE_MAX_SESSION_MIN, LIVE_MODEL, LIV
                     MAX_HISTORY_TURNS, PROVIDER_LABEL, PROVIDERS)
 from prompts import (FREE_TALK_OPEN, FREE_TALK_ROLE, LIVE_SYSTEM, SCENARIOS, START_MESSAGE, TOPIC_ROLE,
                      TUTOR_SYSTEM)
-from services import album, galaxy, nav, rewards, space, db, learn, live, llm, users, voice
+from services import album, compete, galaxy, nav, rewards, space, db, learn, live, llm, users, voice
 from syllabus import topic_for
 from services.voice_chat import voice_chat
 
@@ -369,6 +369,11 @@ def history_view() -> None:
     if prof.is_admin:
         people = sorted(set(db.known_users()) | {email})
         who = st.selectbox("Pessoa", people, index=people.index(email))
+    with st.expander("🏁 Corrida Espacial da semana (todo mundo)", expanded=False):
+        st.caption("⭐ estrela de exercício = 10 · 💬 fala na conversa = 2 · 🎬 vídeo = 15 · zera toda segunda")
+        st.markdown(race_board_html(compete.board(), "points", "pts"), unsafe_allow_html=True)
+        st.markdown("**⚡ Recordes do Desafio Relâmpago**")
+        st.markdown(race_board_html(compete.challenge_board(), "score", "pts"), unsafe_allow_html=True)
     with st.expander("📨 Resumo da semana para a família", expanded=False):
         txt = family_report(who)
         st.text_area("Resumo", txt, height=220, label_visibility="collapsed")
@@ -460,8 +465,18 @@ def settings_view() -> None:
         st.rerun()
     st.caption("No nível Infantil o app vira sempre o tema Espaço.")
     if KIDS_PROFILE or LEVELS.get(ss.level, {}).get("kids") or ss.get("astro"):
-        with st.expander("👩‍🚀 Meu astronauta (nome e nave)"):
-            astro_form("astro_settings", "Mude o nome ou a nave quando quiser:")
+        with st.expander("👩‍🚀 Meu astronauta (nome, rosto e nave)"):
+            astro_form("astro_settings", "Mude o nome, quem você é no jogo ou a nave quando quiser:")
+    if prof.is_admin and db.enabled():
+        opts = {3: "3 por dia", 5: "5 por dia", 10: "10 por dia", 0: "Sem limite"}
+        cur_lim = daily_limit()
+        new_lim = st.segmented_control("🪐 Planetas novos por dia (perfil infantil)", list(opts),
+                                       format_func=lambda k: opts[k], default=cur_lim if cur_lim in opts else 3,
+                                       key="kid_limit_pick")
+        if new_lim is not None and new_lim != cur_lim:
+            db.set_pref("__app__", "kid_limit", str(new_lim))
+            st.toast("Limite atualizado ✅")
+        st.caption("Refazer planetas que ele já visitou e o ⚡ Desafio nunca contam no limite.")
     st.divider()
     st.markdown(f"**Conta:** {email}" + (" · administrador" if prof.is_admin else ""))
     lv = LEVELS.get(prof.level or "", None)
@@ -573,11 +588,28 @@ def learn_level() -> str:
     return ss.level
 
 
+AVATARS = ["🧑🏻‍🚀", "🧑🏽‍🚀", "🧑🏿‍🚀", "👦🏻", "👦🏽", "👦🏿", "👧🏻", "👧🏽", "👧🏿", "🐶", "🐱", "🦁", "🐼", "🦖", "🤖"]
+
+
 def kids_astro() -> tuple[str, str]:
     if "astro" not in ss:
         ss.astro = (db.get_pref(email, "astronauta") if db.enabled() else None) or ""
-    name, _, ship = ss.astro.partition("|")
-    return name, ship or "🚀"
+    parts = ss.astro.split("|")
+    return parts[0], (parts[1] if len(parts) > 1 and parts[1] else "🚀")
+
+
+def kids_avatar() -> str:
+    kids_astro()
+    parts = ss.astro.split("|")
+    return parts[2] if len(parts) > 2 and parts[2] else "🧑‍🚀"
+
+
+def daily_limit() -> int:
+    """Planetas novos por dia no perfil infantil (0 = sem limite). O admin muda em Ajustes."""
+    try:
+        return int((db.get_pref("__app__", "kid_limit") if db.enabled() else None) or rewards.DAILY_LIMIT)
+    except ValueError:
+        return rewards.DAILY_LIMIT
 
 
 def astro_form(key: str = "astro_form", title: str = "### 👩‍🚀 Vamos montar o seu astronauta!") -> None:
@@ -585,10 +617,13 @@ def astro_form(key: str = "astro_form", title: str = "### 👩‍🚀 Vamos mont
     with st.form(key):
         st.markdown(title)
         nm = st.text_input("Como se chama o astronauta?", value=name, max_chars=20)
+        av_now = kids_avatar()
+        av = st.radio("Quem é você no jogo?", AVATARS, index=AVATARS.index(av_now) if av_now in AVATARS else 0,
+                      horizontal=True)
         ships = ["🚀", "🛸", "🛰️"]
         sh = st.radio("Escolha a nave", ships, index=ships.index(ship) if ship in ships else 0, horizontal=True)
         if st.form_submit_button("Decolar! 🚀", type="primary", width="stretch") and nm.strip():
-            ss.astro = f"{nm.strip()}|{sh}"
+            ss.astro = f"{nm.strip()}|{sh}|{av}"
             if db.enabled():
                 db.set_pref(email, "astronauta", ss.astro)
             st.rerun()
@@ -623,7 +658,7 @@ def pregen_missions(lvl: str, nums: list[int]) -> None:
         def work(n=n, tag=tag):
             try:
                 topic, rnd = topic_for(lvl, n)
-                ex, _u = learn.make_kids_exercise(lv["guide"], topic, rnd, key)
+                ex, _u = learn.make_kids_exercise(lv["guide"], topic, rnd, key, num=n)
                 if not db.get_exercise(lvl, n):
                     db.save_exercise(lvl, n, topic, ex)
             except Exception as e:
@@ -631,6 +666,127 @@ def pregen_missions(lvl: str, nums: list[int]) -> None:
             finally:
                 state["running"].discard(tag)
         threading.Thread(target=work, daemon=True).start()
+
+
+def race_board_html(rows: list[dict], key: str, unit: str) -> str:
+    medals = ["🥇", "🥈", "🥉"]
+    if not rows:
+        return '<div class="kp-card" style="text-align:center">Ninguém pontuou ainda esta semana. Seja o primeiro! 🚀</div>'
+    top = rows[0][key] or 1
+    out = []
+    for i, r in enumerate(rows[:8]):
+        me = r["email"] == email
+        bar = max(6, int(100 * (r[key] or 0) / top))
+        out.append(f'<div style="display:flex;align-items:center;gap:10px;margin:8px 0;padding:8px 10px;border-radius:16px;'
+                   f'background:{"rgba(255,224,102,.18)" if me else "rgba(255,255,255,.07)"};'
+                   f'border:2px solid {"#FFE066" if me else "rgba(126,232,255,.25)"}">'
+                   f'<div style="font-size:26px;width:34px;text-align:center">{medals[i] if i < 3 else i + 1}</div>'
+                   f'<div style="font-size:34px">{r["avatar"]}</div>'
+                   f'<div style="flex:1;min-width:0"><div style="font-weight:900;font-size:1.05rem">{html_escape(r["name"])}'
+                   f'{" (você)" if me else ""}</div>'
+                   f'<div style="height:10px;border-radius:99px;background:rgba(255,255,255,.12);margin-top:4px">'
+                   f'<div style="height:100%;width:{bar}%;border-radius:99px;background:linear-gradient(90deg,#FFE066,#FFB020)">'
+                   f'</div></div></div><div style="font-weight:900;font-size:1.1rem;white-space:nowrap">{r[key]} {unit}</div></div>')
+    return "".join(out)
+
+
+def challenge_pool(lvl: str) -> list[dict]:
+    """Perguntas de escolher (com emoji) das missões que já existem até o planeta onde ele está."""
+    done = db.exercises_done_map(email, lvl) if db.enabled() else {}
+    upto = max(3, kids_next(done) - 1)
+    pool = []
+    for n in range(1, upto + 1):
+        row = db.get_exercise(lvl, n) if db.enabled() else None
+        ex = (row or {}).get("content") or {}
+        if isinstance(ex, str):
+            ex = json.loads(ex)
+        for q in (ex.get("questions") or []):
+            if q.get("type") == "mc" and q.get("options") and q.get("answer") in q["options"]:
+                pool.append(q)
+    return pool
+
+
+def race_view(lvl: str) -> None:
+    """Corrida Espacial: placar da semana + Desafio Relâmpago de 60 segundos."""
+    import random
+    import time as _t
+    ch = ss.get("challenge")
+    if ch and not ch.get("over"):
+        challenge_play(ch)
+        return
+    if ch and ch.get("over"):
+        r = ch["result"]
+        if r["new_record"]:
+            galaxy.mascot("NEW RECORD! 🏆", f"NOVO RECORDE! {r['score']} pontos!", party=True, big=True, confetti=True,
+                          medal="🏆", medal_text=f"{r['score']} pontos", key=f"ch_rec_{ch['id']}")
+        else:
+            galaxy.mascot(f"{r['score']} points! 🚀", f"Você fez {r['score']} pontos! Seu recorde é {r['best']}. "
+                          "Tente de novo para bater!", party=True, confetti=r["score"] > 0, key=f"ch_end_{ch['id']}")
+    st.markdown('<div style="font-size:1.6rem;font-weight:900;margin:4px 0">⚡ Desafio Relâmpago</div>'
+                '<div style="color:#AFC0E8;margin-bottom:8px">60 segundos para acertar o máximo de palavras '
+                'das suas missões. Acerto rápido vale mais!</div>', unsafe_allow_html=True)
+    pool = challenge_pool(lvl)
+    best = compete.load_best(email) if db.enabled() else {"best": 0}
+    if len(pool) < 4:
+        st.info("Complete pelo menos 1 planeta para liberar o desafio! 🪐", icon="🔒")
+    elif st.button(f"⚡ Começar desafio (seu recorde: {best['best']})", type="primary", width="stretch", key="ch_go"):
+        random.shuffle(pool)
+        ss.challenge = {"id": int(_t.time()), "qs": pool[:20], "i": 0, "ok": 0, "bad": 0, "start": _t.time(),
+                        "over": False}
+        st.rerun()
+    if not db.enabled():
+        return
+    st.markdown('<div style="font-size:1.3rem;font-weight:900;margin:18px 0 4px">🏆 Recordes do desafio (semana)</div>',
+                unsafe_allow_html=True)
+    st.markdown(race_board_html(compete.challenge_board(), "score", "pts"), unsafe_allow_html=True)
+    st.markdown('<div style="font-size:1.3rem;font-weight:900;margin:18px 0 4px">🏁 Corrida Espacial da semana</div>'
+                '<div style="color:#AFC0E8;font-size:.9rem">⭐ estrela = 10 · 💬 fala na conversa = 2 · '
+                '🎬 vídeo = 15 · zera toda segunda</div>', unsafe_allow_html=True)
+    st.markdown(race_board_html(compete.board(), "points", "pts"), unsafe_allow_html=True)
+
+
+def challenge_play(ch: dict) -> None:
+    import time as _t
+    left = 60 - (_t.time() - ch["start"])
+    if left <= 0 or ch["i"] >= len(ch["qs"]):
+        score = compete.score_for(ch["ok"], ch["bad"], 60 - max(0, left))
+        res = compete.save_score(email, score) if db.enabled() else {"best": score, "new_record": True}
+        ch.update(over=True, result={"score": score, **res})
+        st.rerun()
+    q = ch["qs"][ch["i"]]
+    st.markdown(f'<div style="display:flex;justify-content:space-between;font-weight:900;font-size:1.2rem">'
+                f'<span>⚡ {ch["ok"]} acertos</span><span>⏱️ {int(left)}s</span></div>'
+                f'<div style="height:14px;border-radius:99px;background:rgba(255,255,255,.12);overflow:hidden;margin:6px 0 12px">'
+                f'<div style="height:100%;width:{left / 60 * 100:.1f}%;background:linear-gradient(90deg,#FF6FB5,#FFB020);'
+                f'animation: chbar {left:.1f}s linear forwards"></div></div>'
+                f'<style>@keyframes chbar {{ to {{ width:0% }} }}</style>', unsafe_allow_html=True)
+    if ss.get("ch_fb"):
+        fb = ss.pop("ch_fb")
+        st.markdown(f'<div style="text-align:center;font-size:2rem;line-height:1">{"✅" if fb == "ok" else "❌"}</div>',
+                    unsafe_allow_html=True)
+    prompt = q.get("prompt") or ""
+    say = q.get("say") or prompt or q["answer"]
+    ins = q.get("instruction_pt") or "Escolha a resposta certa"
+    st.markdown(f'<div class="kp-card"><div class="kp-ins">{html_escape(ins)}</div>'
+                + (f'<div class="kp-q">{html_escape(prompt)}</div>' if prompt else "") + '</div>', unsafe_allow_html=True)
+    tag = f"{ch['id']}:{ch['i']}"
+    said = ss.setdefault("ch_said", set())
+    if tag not in said:
+        said.add(tag)
+        _say(say)
+    emo = q.get("emojis") or []
+    cols = st.columns(2)
+    for j, opt in enumerate(q["options"]):
+        label = f"{emo[j]}  {opt}" if j < len(emo) and emo[j] else opt
+        if cols[j % 2].button(label, key=f"ch_{tag}_{j}", width="stretch"):
+            ok = learn.check_answer(q, opt, lenient=True)
+            ch["ok" if ok else "bad"] += 1
+            ss.ch_fb = "ok" if ok else "bad"
+            ch["i"] += 1
+            st.rerun()
+    if st.button("🏳️ Parar", key=f"ch_stop_{ch['id']}"):
+        ch["start"] -= 999
+        st.rerun()
 
 
 def album_view(lvl: str) -> None:
@@ -657,7 +813,8 @@ def kids_galaxy(lvl: str, done: dict) -> None:
     days = db.kid_days(email, lvl) if db.enabled() else []
     today_nums = db.kid_today_nums(email, lvl) if db.enabled() else set()
     streak = rewards.streak(days)
-    limit_hit = KIDS_PROFILE and len(today_nums) >= rewards.DAILY_LIMIT
+    lim = daily_limit()
+    limit_hit = KIDS_PROFILE and lim > 0 and len(today_nums) >= lim
 
     n_blocks = max(3, (nxt - 1) // 10 + 2)
     names = [space.galaxy_name(i) for i in range(n_blocks)]
@@ -681,26 +838,28 @@ def kids_galaxy(lvl: str, done: dict) -> None:
                         "boss": ("sun" if info["key"] == "sun" else "big") if info["boss"] else None})
     first, last = b * 10 + 1, b * 10 + 10
     if limit_hit:
-        say, sub = "Mission complete for today! 🌙", (f"Você já explorou {len(today_nums)} planetas hoje, {name}! "
-                                                      "Descanse e volte amanhã para continuar a viagem.")
+        say, sub = "Great job today! See you tomorrow! 🌙", (f"Muito bem hoje! Até amanhã! · Planetas novos só amanhã, "
+                                                             f"mas você pode treinar nos que já visitou e jogar o ⚡ Desafio!")
     elif first <= nxt <= last:
-        say, sub = f"Hi, {name}! Let's fly to {space.stop(nxt)['en']}!", f"Toque no planeta para entrar!"
+        say, sub = (f"Hi, {name}! Let's fly to {space.stop(nxt)['en']}!",
+                    f"Oi, {name}! Vamos voar para {space.stop(nxt)['pt']}! 👆 Toque no planeta")
     elif nxt > last:
         say, sub = "Wow! You explored this whole galaxy! 🌟", "Uau! Você explorou esta galáxia inteira!"
     else:
-        say, sub = "This galaxy is still far away… 🔭", f"Primeiro explore {space.stop(nxt)['pt']}."
+        say, sub = "This galaxy is still far away! 🔭", f"Esta galáxia ainda está longe! Primeiro explore {space.stop(nxt)['pt']}."
     goal_ok = len(today_nums) >= rewards.DAILY_GOAL
-    hud = [{"t": f"🔥 {streak} {'dia' if streak == 1 else 'dias'} seguidos" if streak else "🔥 Comece sua sequência!"},
-           {"t": "🎯 Meta de hoje: feita! ✓" if goal_ok else "🎯 Meta de hoje: 1 planeta", "ok": goal_ok},
-           {"t": f"💰 {wallet} ⭐ para gastar"}]
+    hud = [{"t": f"🔥 {streak}"}, {"t": "🎯 ✓" if goal_ok else "🎯 0/1", "ok": goal_ok}, {"t": f"💰 {wallet}"}]
     in_gal = sum(1 for n in range(first, last + 1) if n in done)
     left = 10 - in_gal
     boss = space.stop(last)["pt"]
-    prog_text = (f"Faltam {left} {'planeta' if left == 1 else 'planetas'} para chegar ao {boss}!" if left
-                 else "Galáxia completa! 🏆")
+    prog_text = f"🏁 {left} até o {boss}" if left else "🏆 Galáxia completa!"
     foot = "Em Andrômeda ainda não conhecemos planetas de verdade: estes são imaginários! ✨" if g["imaginary"] else ""
-    pick = galaxy.galaxy_map(planets, say, sub, name=name, ship=ship_eq, total_stars=stars, foot=foot,
-                             galaxy=g["name"], where=g["where"], key=f"gx_{b}", hat=hat, hud=hud,
+    if ss.get("shop_party"):   # acabou de comprar: o Bip aparece grande, com o chapéu novo e confete
+        it = ss.pop("shop_party")
+        galaxy.mascot(f"Wow! I love it! {it['emoji']}", f"Uau! Eu amei! Obrigado pelo {it['name']}, {name}!",
+                      party=True, big=True, confetti=True, hat=hat, key=f"shop_party_{it['id']}")
+    pick = galaxy.galaxy_map(planets, say, sub, name=f"{kids_avatar()} {name}", ship=ship_eq, total_stars=stars,
+                             foot=foot, galaxy="", where="", key=f"gx_{b}", hat=hat, hud=hud,
                              progress=in_gal / 10, progress_text=prog_text)
     if pick:
         ss.kid_inside, ss.kid_lvl = int(pick), lvl
@@ -717,7 +876,10 @@ def kids_galaxy(lvl: str, done: dict) -> None:
                 label = f"{it['emoji']} {it['name']}\n" + ("✓ usando" if using else "usar" if owned else f"{it['price']} ⭐")
                 if cols[j % 3].button(label, key=f"shop_{it['id']}", width="stretch", disabled=using):
                     ok, msg = rewards.buy(email, shop, it["id"], stars)
-                    ss.shop_msg = msg
+                    if ok:
+                        ss.shop_party = it
+                    else:
+                        ss.shop_msg = msg
                     st.rerun()
         if ss.get("shop_msg"):
             st.success(ss.pop("shop_msg"))
@@ -764,7 +926,7 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
         with st.spinner(f"🚀 Pousando em {info['en']}..."):
             try:
                 lv = LEVELS[lvl]
-                ex, u = learn.make_kids_exercise(lv["guide"], topic, rnd, prof.keys.get("anthropic"))
+                ex, u = learn.make_kids_exercise(lv["guide"], topic, rnd, prof.keys.get("anthropic"), num=num)
                 log(step="exercício", provider="Anthropic", model=u["model"], ok=True,
                     input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
                 db.save_exercise(lvl, num, topic, ex)
@@ -789,10 +951,20 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
         stt.pop("flash", None)
         score = sum(1 for v in stt["res"].values() if v)
         total = len(qs)
-        if galaxy.passed(score, total):
+        if galaxy.passed(score, total) and info["boss"]:
+            # fim de galáxia: medalha grande, confete e o Bip gigante comemorando
+            MEDALS = ["🏅", "🏆", "👑"]
+            gi = (num - 1) // 10
+            galaxy.mascot("YOU DID IT! Galaxy complete! 🎉", f"VOCÊ CONSEGUIU! Completou a galáxia {info['galaxy']}! "
+                          f"Ganhou a medalha e uma figurinha nova no álbum!", party=True, big=True, confetti=True,
+                          hat=hat, medal=MEDALS[gi % 3], medal_text=f"Medalha {info['galaxy']}", key=f"kp_party_{num}")
+            if st.button("🚀 Voar para a próxima galáxia!", type="primary", width="stretch", key=f"kp_next_{num}"):
+                ss.kid_inside, ss.kid_blk_i = None, gi + 1
+                st.rerun()
+        elif galaxy.passed(score, total):
             galaxy.mascot(f"Mission complete! {'⭐' * galaxy.stars_for(score, total)}",
                           f"Missão cumprida em {info['pt']}! Você acertou {score} de {total}.", party=True,
-                          key=f"kp_party_{num}")
+                          confetti=True, hat=hat, key=f"kp_party_{num}")
             if st.button("🚀 Voar para o próximo planeta", type="primary", width="stretch", key=f"kp_next_{num}"):
                 ss.kid_inside = num + 1
                 st.rerun()
@@ -1227,11 +1399,16 @@ def learn_view() -> None:
     kids = bool(LEVELS.get(ss.level, {}).get("kids"))
     if kids:
         # infantil: sem título nem seletor de nível — 3 cartões ilustrados e o conteúdo logo abaixo
-        T = "app/static/theme/"
-        items = [{"key": "planetas", "label": "Planetas", "img": T + "planet_saturn.webp"},
-                 {"key": "desenhos", "label": "Desenhos", "img": T + "robot_party.webp"},
-                 {"key": "diz", "label": "Como se diz?", "img": T + "robot_wave.webp"},
-                 {"key": "album", "label": "Álbum", "img": T + "p_ringgold.webp"}]
+        from pathlib import Path as _P
+        _theme = _P(__file__).resolve().parent / "static" / "theme"
+
+        def timg(name: str, fallback: str) -> str:   # usa a ilustração nova se já existir
+            return "app/static/theme/" + (name if (_theme / name).exists() else fallback)
+        items = [{"key": "planetas", "label": "Planetas", "img": timg("tile_planets.webp", "planet_saturn.webp")},
+                 {"key": "corrida", "label": "Corrida", "img": timg("tile_race.webp", "rocket.webp")},
+                 {"key": "album", "label": "Álbum", "img": timg("tile_album.webp", "p_ringgold.webp")},
+                 {"key": "desenhos", "label": "Desenhos", "img": timg("tile_cartoons.webp", "robot_party.webp")},
+                 {"key": "diz", "label": "Como se diz?", "img": timg("tile_say.webp", "robot_wave.webp")}]
         cur = ss.get("kid_tab", "planetas")
         pick = ui.kid_tiles(items, cur, key="kid_tabs")
         if pick and pick != cur:
@@ -1243,6 +1420,8 @@ def learn_view() -> None:
             videos_tab(ss.level)
         elif cur == "album":
             album_view(ss.level)
+        elif cur == "corrida":
+            race_view(ss.level)
         else:
             translator_tab()
         return
@@ -1439,7 +1618,9 @@ for i, t in enumerate(ss.turns):
         c = t.get("correction")
         if c:
             ui.correction(c["better"], c["tip_pt"])
-        if i == last_ai - 1 and not ss.summary and st.button("↩️ Não foi isso que eu disse", key=f"undo_{i}",
+        if i == last_ai - 1 and not ss.summary and st.button(
+                "🔁 Não falei isso, quero falar de novo" if LEVELS[ss.level].get("kids") else "↩️ Não foi isso que eu disse",
+                key=f"undo_{i}",
                                                               help="Apaga esta fala e a resposta; é só falar de novo."):
             undo_last_exchange()
             st.rerun()

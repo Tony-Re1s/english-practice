@@ -421,6 +421,9 @@ _TILES_CSS = """
   transition: transform .3s cubic-bezier(.2,.8,.2,1); }
 .kt-c span { color:#FFFFFF; font-weight:900; font-size:clamp(13px, 3.6vw, 18px); line-height:1.1; text-align:center;
   text-shadow:0 2px 6px rgba(0,0,0,.6); margin-top:4px; }
+.kt.many .kt-c { padding:6px 2px 8px; }
+.kt.many .kt-c span { font-size:clamp(10.5px, 2.85vw, 17px); letter-spacing:-.01em; }
+.kt-c span { overflow-wrap:normal; word-break:keep-all; hyphens:none; }
 .kt-c.on { background:linear-gradient(180deg, #FFE066, #FFB020); border-color:#FFF3B0; box-shadow:0 5px 0 #A86A00, 0 0 22px rgba(255,208,64,.55); }
 .kt-c.on span { color:#2A1600; text-shadow:none; }
 .kt-c.on img { transform:scale(1.08) rotate(-4deg); }
@@ -430,14 +433,14 @@ _TILES_CSS = """
 @media (min-width: 641px) { .kt-c { height:118px; } }
 .kt.sm .kt-c { flex-direction:row; justify-content:center; gap:6px; height:clamp(56px, 15vw, 72px); padding:6px 8px; }
 .kt.sm .kt-c img { flex:0 0 auto; height:78%; max-width:32%; }
-.kt.sm .kt-c span { margin:0; font-size:clamp(11px, 3vw, 16px); text-align:left; overflow-wrap:anywhere; min-width:0; }
+.kt.sm .kt-c span { margin:0; font-size:clamp(10.5px, 2.9vw, 16px); text-align:left; overflow-wrap:normal; min-width:0; }
 .kt.sm .kt-c { gap:4px !important; padding:6px 5px !important; }
 """
 _TILES_JS = """
 export default function (component) {
   const { data, setTriggerValue, parentElement } = component;
   const old = parentElement.querySelector('.kt'); if (old) old.remove();
-  const box = document.createElement('div'); box.className = 'kt' + (data.small ? ' sm' : '');
+  const box = document.createElement('div'); box.className = 'kt' + (data.small ? ' sm' : '') + ((data.items || []).length >= 5 ? ' many' : '');
   box.style.setProperty('--n', (data.items || []).length);
   (data.items || []).forEach((it) => {
     const c = document.createElement('div');

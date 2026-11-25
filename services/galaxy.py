@@ -7,7 +7,7 @@ Tudo é CSS + emoji (sem imagens), para continuar leve no celular.
 import streamlit as st
 
 CSS = """
-.gx { font-family:'Nunito',system-ui,sans-serif; border-radius:22px; padding:14px 12px 18px; color:#fff;
+.gx { position:relative; font-family:'Nunito',system-ui,sans-serif; border-radius:22px; padding:14px 12px 18px; color:#fff;
   background-color:rgba(10,12,38,.35);
   background-image: radial-gradient(1.5px 1.5px at 12% 18%, #fff 50%, transparent 51%),
     radial-gradient(1px 1px at 78% 12%, #fff 50%, transparent 51%),
@@ -25,6 +25,18 @@ CSS = """
 @keyframes gx-wiggle { 0%,100% { transform: rotate(0) } 25% { transform: rotate(-10deg) translateY(-4px) } 75% { transform: rotate(10deg) translateY(-4px) } }
 .gx-oops .gx-bot { animation: gx-shake .4s ease-in-out 2; }
 @keyframes gx-shake { 0%,100% { transform: translateX(0) } 30% { transform: translateX(-5px) } 70% { transform: translateX(5px) } }
+.gx-big .gx-bot { width:120px; height:136px; background-size:contain; }
+.gx-big .gx-hat { font-size:56px; top:-34px; }
+.gx-big .gx-say { font-size:1.25rem; }
+.gx-big .gx-top { align-items:center; }
+.gx-say { cursor:pointer; }
+.gx-say .gx-snd { font-size:.8em; opacity:.7; margin-left:4px; }
+.gx-medal { text-align:center; font-size:84px; line-height:1; margin:4px 0 8px; animation: gx-medal 1.2s cubic-bezier(.2,.8,.2,1); }
+.gx-medal small { display:block; font-size:16px; font-weight:900; color:#FFE066; margin-top:6px; }
+@keyframes gx-medal { 0% { transform:scale(0) rotate(-40deg) } 70% { transform:scale(1.25) rotate(8deg) } 100% { transform:scale(1) } }
+.gx-conf { position:absolute; inset:0; pointer-events:none; overflow:hidden; border-radius:inherit; }
+.gx-conf b { position:absolute; top:-12px; width:9px; height:14px; border-radius:2px; animation: gx-fall linear forwards; }
+@keyframes gx-fall { to { transform: translateY(520px) rotate(720deg); opacity:.2 } }
 .gx-hud { display:flex; flex-wrap:wrap; gap:6px; margin:0 4px 10px; }
 .gx-hud span { font-size:12.5px; font-weight:800; padding:4px 10px; border-radius:999px; background:rgba(255,255,255,.12);
   border:1px solid rgba(255,255,255,.18); }
@@ -96,13 +108,14 @@ export default function (component) {
   const old = root.querySelector('.gx'); if (old) old.remove();
   const d = data || {};
   const box = document.createElement('div');
-  box.className = 'gx' + (d.party ? ' gx-party' : '') + (d.oops ? ' gx-oops' : '');
+  box.className = 'gx' + (d.party ? ' gx-party' : '') + (d.oops ? ' gx-oops' : '') + (d.big ? ' gx-big' : '');
   if (d.sound && root.__lastSound !== d.sound_key) { root.__lastSound = d.sound_key; setTimeout(() => sfx(d.sound), 120); }
   const stars = n => '⭐'.repeat(n) + '☆'.repeat(3 - n);
   const bot = IMG + (d.party ? 'robot_party.webp' : 'robot_wave.webp');
   let html = `<div class="gx-top"><div class="gx-botw"><div class="gx-bot" style="background-image:url('${bot}')"></div>
     ${d.hat ? `<span class="gx-hat">${d.hat}</span>` : ''}</div>
-    <div class="gx-say">${d.say || ''}${d.sub ? `<small>${d.sub}</small>` : ''}</div></div>`;
+    <div class="gx-say">${d.say || ''}<span class="gx-snd">🔊</span>${d.sub ? `<small>${d.sub}</small>` : ''}</div></div>`;
+  if (d.medal) html += `<div class="gx-medal">${d.medal}<small>${d.medal_text || ''}</small></div>`;
   if (d.planets && d.planets.length) {
     if (d.galaxy) html += `<div class="gx-title">🌌 ${d.galaxy}<small>${d.where || ''}</small></div>`;
     html += `<div class="gx-stats"><span>${d.ship || '🚀'} ${d.name || ''}</span><span>⭐ ${d.total_stars || 0}</span></div>`;
@@ -120,6 +133,18 @@ export default function (component) {
     html += '</div>';
     if (d.foot) html += `<div class="gx-foot">${d.foot}</div>`;
   }
+  setTimeout(() => {
+    const sayEl = box.querySelector('.gx-say');
+    if (sayEl) sayEl.addEventListener('click', () => { try { speechSynthesis.cancel();
+      const txt = (d.say || '').replace(/[^\p{L}\p{N}\s',.!?-]/gu, '');
+      const u = new SpeechSynthesisUtterance(txt); u.lang = 'en-US'; u.rate = .85; u.pitch = 1.3; speechSynthesis.speak(u); } catch (e) {} });
+    if (d.confetti) { const cf = document.createElement('div'); cf.className = 'gx-conf';
+      const cols = ['#FFE066', '#FF6FB5', '#38D6F5', '#7EF0B5', '#A78BFA', '#FF9F1C'];
+      for (let k = 0; k < 70; k++) { const b = document.createElement('b'); b.style.left = (Math.random() * 100) + '%';
+        b.style.background = cols[k % cols.length]; b.style.animationDuration = (1.6 + Math.random() * 1.8) + 's';
+        b.style.animationDelay = (Math.random() * .6) + 's'; cf.appendChild(b); }
+      box.appendChild(cf); }
+  }, 0);
   function cell(pl) {
     const cls = ['gx-p'];
     if (pl.boss) cls.push('boss', pl.boss);
@@ -182,11 +207,14 @@ def galaxy_map(planets: list[dict], say: str, sub: str = "", name: str = "", shi
 
 
 def mascot(say: str, sub: str = "", party: bool = False, key: str = "mascot", hat: str = "",
-           oops: bool = False, sound: bool = True) -> None:
-    """Só o robozinho falando (com chuva de estrelas e som quando party=True; balança e faz 'oops' quando oops=True)."""
+           oops: bool = False, sound: bool = True, big: bool = False, medal: str = "", medal_text: str = "",
+           confetti: bool = False) -> None:
+    """O robozinho falando (estrelas e som quando party=True; balança quando oops=True).
+    big = Bip grande (comemorações); medal = emoji gigante de medalha; confetti = chuva de confete. Tocar no balão lê o inglês."""
     snd = ("win" if party else "oops" if oops else None) if sound else None
     _component(key=key, data={"say": say, "sub": sub, "party": party, "oops": oops, "hat": hat,
-                              "sound": snd, "sound_key": key})
+                              "sound": snd, "sound_key": key, "big": big, "medal": medal, "medal_text": medal_text,
+                              "confetti": confetti})
 
 
 # --- Dentro do planeta: trilha de paradas e montar frase ------------------------------------

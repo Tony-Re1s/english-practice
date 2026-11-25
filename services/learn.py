@@ -139,7 +139,28 @@ KIDS_EXERCISE_TOOL = {
 }
 
 
-def make_kids_exercise(level_guide: str, topic: str, rnd: int, api_key: str | None) -> tuple[dict, dict]:
+# Cada missão ganha uma "historinha" diferente, para as perguntas não parecerem sempre iguais.
+KIDS_STORIES = [
+    "Bip the robot lands on the planet and meets a friendly alien who asks him questions.",
+    "a treasure hunt: each question is a clue that opens a space chest.",
+    "a space TV quiz show with a funny host and a big prize.",
+    "Bip lost his things on the planet; the child helps him find them.",
+    "a picnic on the planet with alien friends and their pets.",
+    "a space school where the child is the teacher for one day.",
+    "a race between two rockets; each right answer gives fuel.",
+    "Bip is sick and only English words make him feel better.",
+    "a space zoo with strange animals that understand only English.",
+    "a birthday party for an alien, with games and presents.",
+]
+KIDS_MIXES = [
+    "Start with 2 'listen and choose', then 1 'yes or no', 1 'missing word', 1 'look and write', end with 1 'listen and choose'.",
+    "Start with 1 'yes or no', then 2 'missing word', 1 'listen and choose', 1 'look and write', end with 1 'yes or no'.",
+    "Start with 1 'look and write', then 2 'listen and choose', 2 'yes or no', end with 1 'missing word'.",
+    "Alternate: 'listen and choose', 'missing word', 'yes or no', 'listen and choose', 'look and write', 'missing word'.",
+]
+
+
+def make_kids_exercise(level_guide: str, topic: str, rnd: int, api_key: str | None, num: int = 0) -> tuple[dict, dict]:
     system = ("You are a warm primary-school English teacher creating original missions for Brazilian children aged 7-8 "
               "who are beginning English (Cambridge Pre A1 Starters). Listening comes before reading: every question "
               "has text for the robot to read aloud. Use only very common, concrete words and tiny sentences. "
@@ -150,6 +171,9 @@ def make_kids_exercise(level_guide: str, topic: str, rnd: int, api_key: str | No
               f"Level guidance: {level_guide}")
     user = (f"Topic: {topic}.\n"
             + (f"This is review round {rnd}: use new words and situations.\n" if rnd > 1 else "")
+            + (f"Mission story (use it in the questions and examples, it makes each mission feel new): "
+               f"{KIDS_STORIES[num % len(KIDS_STORIES)]}\nQuestion order: {KIDS_MIXES[num % len(KIDS_MIXES)]}\n"
+               if num else "")
             + "Create the mission with exactly 6 questions. Each question must have exactly ONE correct answer, and "
               "every wrong option must be clearly wrong. Prefer 'mc' with emojis that show the meaning. 'fill' answers "
               "must be one or two easy words already shown in the examples. Check each question yourself.")

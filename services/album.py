@@ -101,7 +101,7 @@ def _rule_text(rule: tuple) -> str:
 
 def stickers(passed_nums: set[int], stars: int, max_num: int = 30) -> list[dict]:
     """Lista de figurinhas (ganhas e por ganhar), na ordem do álbum."""
-    out = []
+    out, specials = [], []
     for n in range(1, max_num + 1):
         info = space.stop(n)
         en = EN_FACT.get(info["key"], "")
@@ -118,6 +118,6 @@ def stickers(passed_nums: set[int], stars: int, max_num: int = 30) -> list[dict]
             got = stars >= val
         else:
             got = len(passed_nums) >= val
-        out.append({"key": key, "group": "Especiais", "en": en, "pt": pt, "img": _img(file), "emoji": emo,
+        specials.append({"key": key, "group": "✨ Especiais", "en": en, "pt": pt, "img": _img(file), "emoji": emo,
                     "fact_pt": fpt, "fact_en": fen, "got": bool(got), "how": _rule_text(rule)})
-    return out
+    return specials + out

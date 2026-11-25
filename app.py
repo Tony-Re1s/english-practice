@@ -14,7 +14,7 @@ from config import (DEFAULT_LEVEL, LEVELS, LIVE_MAX_SESSION_MIN, LIVE_MODEL, LIV
                     MAX_HISTORY_TURNS, PROVIDER_LABEL, PROVIDERS)
 from prompts import (FREE_TALK_OPEN, FREE_TALK_ROLE, LIVE_SYSTEM, SCENARIOS, START_MESSAGE, TOPIC_ROLE,
                      TUTOR_SYSTEM)
-from services import galaxy, nav, rewards, space, db, learn, live, llm, users, voice
+from services import album, galaxy, nav, rewards, space, db, learn, live, llm, users, voice
 from syllabus import topic_for
 from services.voice_chat import voice_chat
 
@@ -633,6 +633,15 @@ def pregen_missions(lvl: str, nums: list[int]) -> None:
         threading.Thread(target=work, daemon=True).start()
 
 
+def album_view(lvl: str) -> None:
+    """Álbum de figurinhas: planetas concluídos + especiais por conquistas."""
+    done = db.exercises_done_map(email, lvl) if db.enabled() else {}
+    passed = {n for n, v in done.items() if galaxy.passed(*v)}
+    stars = sum(galaxy.stars_for(*v) for v in done.values())
+    st.caption("Toque numa figurinha para virar e ouvir a curiosidade em inglês 🔊")
+    ui.album_grid(album.stickers(passed, stars), key="album_grid")
+
+
 def kids_galaxy(lvl: str, done: dict) -> None:
     """Nível Criança: o mapa da galáxia. Tocar num planeta = mergulhar nele (abre o exercício direto)."""
     name, ship = kids_astro()
@@ -652,9 +661,15 @@ def kids_galaxy(lvl: str, done: dict) -> None:
 
     n_blocks = max(3, (nxt - 1) // 10 + 2)
     names = [space.galaxy_name(i) for i in range(n_blocks)]
-    blk = st.segmented_control("Galáxia", names, default=names[(nxt - 1) // 10], key="kid_blk",
-                               label_visibility="collapsed") or names[(nxt - 1) // 10]
-    b = names.index(blk)
+    GX_IMG = ["sun.webp", "planet_sgr_a.webp", "p_ringpink.webp"]
+    b = ss.get("kid_blk_i", (nxt - 1) // 10)
+    b = min(b, n_blocks - 1)
+    gx_items = [{"key": str(i), "label": names[i], "img": "app/static/theme/" + GX_IMG[i % len(GX_IMG)],
+                 "lock": i * 10 + 1 > nxt and not prof.is_admin} for i in range(n_blocks)]
+    gpick = ui.kid_tiles(gx_items, str(b), key="kid_gx_tiles", small=True)
+    if gpick is not None and int(gpick) != b:
+        ss.kid_blk_i = int(gpick)
+        st.rerun()
     g = space.GALAXIES[b % len(space.GALAXIES)]
     planets = []
     for n in range(b * 10 + 1, b * 10 + 11):
@@ -691,8 +706,7 @@ def kids_galaxy(lvl: str, done: dict) -> None:
         ss.kid_inside, ss.kid_lvl = int(pick), lvl
         st.rerun()
 
-    c1, c2 = st.columns(2)
-    with c1.popover("🛍️ Loja do Bip", width="stretch"):
+    with st.popover("🛍️ Loja do Bip", width="stretch"):
         st.markdown(f"**Você tem {wallet} ⭐** · troque suas estrelas por coisas para o Bip!")
         for kind, title in (("hat", "Chapéus do Bip"), ("ship", "Naves")):
             st.caption(title)
@@ -707,17 +721,6 @@ def kids_galaxy(lvl: str, done: dict) -> None:
                     st.rerun()
         if ss.get("shop_msg"):
             st.success(ss.pop("shop_msg"))
-    with c2.popover(f"📒 Meu álbum ({len([n for n in done if galaxy.passed(*done[n])])})", width="stretch"):
-        got = sorted(n for n in done if galaxy.passed(*done[n]))
-        if not got:
-            st.caption("Explore planetas para colecionar aqui! 🪐")
-        else:
-            html_cards = "".join(
-                f'<div style="text-align:center"><img src="{space.stop(n)["img"]}" style="width:64px;height:64px">'
-                f'<div style="font-weight:800;font-size:13px">{space.stop(n)["en"]}</div>'
-                f'<div style="font-size:11px">{"⭐" * galaxy.stars_for(*done[n])}</div></div>' for n in got)
-            st.markdown(f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:10px">'
-                        f'{html_cards}</div>', unsafe_allow_html=True)
 
 
 def _say(text: str) -> None:
@@ -1223,12 +1226,29 @@ def learn_view() -> None:
         return
     kids = bool(LEVELS.get(ss.level, {}).get("kids"))
     if kids:
-        ui.hero("🚀 Missões", "Escolha um planeta e mergulhe nele!")
-    else:
-        ui.hero("📚 Aprender", "Trilhas separadas da conversa: gramática por nível, vídeos para treinar a escuta e um tradutor.")
-    lvl = learn_level() if not KIDS_PROFILE else ss.level
-    t1, t2, t3 = st.tabs(["🪐 Planetas", "📺 Desenhos", "🔤 Como se diz?"] if kids else
-                         ["📝 Gramática", "🎬 Vídeos", "🔤 Tradutor"])
+        # infantil: sem título nem seletor de nível — 3 cartões ilustrados e o conteúdo logo abaixo
+        T = "app/static/theme/"
+        items = [{"key": "planetas", "label": "Planetas", "img": T + "planet_saturn.webp"},
+                 {"key": "desenhos", "label": "Desenhos", "img": T + "robot_party.webp"},
+                 {"key": "diz", "label": "Como se diz?", "img": T + "robot_wave.webp"},
+                 {"key": "album", "label": "Álbum", "img": T + "p_ringgold.webp"}]
+        cur = ss.get("kid_tab", "planetas")
+        pick = ui.kid_tiles(items, cur, key="kid_tabs")
+        if pick and pick != cur:
+            ss.kid_tab = pick
+            st.rerun()
+        if cur == "planetas":
+            grammar_tab(ss.level)
+        elif cur == "desenhos":
+            videos_tab(ss.level)
+        elif cur == "album":
+            album_view(ss.level)
+        else:
+            translator_tab()
+        return
+    ui.hero("📚 Aprender", "Trilhas separadas da conversa: gramática por nível, vídeos para treinar a escuta e um tradutor.")
+    lvl = learn_level()
+    t1, t2, t3 = st.tabs(["📝 Gramática", "🎬 Vídeos", "🔤 Tradutor"])
     with t1:
         grammar_tab(lvl)
     with t2:

@@ -287,6 +287,11 @@ button[data-variant][aria-checked="true"] *, button[data-variant][data-selected=
 .bubble, .tip, .tip *, .msg .bubble * {{ color:#21414A !important; }}
 hr {{ border-color:{t['edge']} !important; }}
 .vid-title {{ color:{t['text']}; }}
+[data-testid="stMainBlockContainer"], .block-container {{ margin-bottom:110px !important; }}
+/* elementos invisíveis (estilos, sons, parallax) não ocupam espaço nem deixam buraco no topo */
+.st-key-head_tags, .st-key-parallax, .st-key-click_sounds,
+[data-testid="stElementContainer"]:has(> .stMarkdown [data-testid="stMarkdownContainer"] > style:only-child) {{
+  display:none !important; }}
 /* celular e tablet */
 @media (max-width: 640px) {{ .block-container {{ padding:1rem .85rem 1.6rem !important; border-radius:20px; margin-top:6px; }}
   .hero h1 {{ font-size:1.8rem !important; }} }}
@@ -403,6 +408,134 @@ def scene_cards(items: list[dict], selected: str, key: str):
     """items: [{'key','label','img'}]. Retorna a chave tocada (ou None)."""
     res = _cards(key=key, data={"items": items, "selected": selected}, on_pick_change=lambda: None)
     return getattr(res, "pick", None)
+
+
+# --- Cartões ilustrados do modo infantil (menu das abas e escolha de galáxia) ----------------
+_TILES_CSS = """
+.kt { display:grid; grid-template-columns:repeat(var(--n,3), 1fr); gap:clamp(6px, 2vw, 14px); font-family:'Nunito',system-ui,sans-serif; }
+.kt-c { position:relative; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; cursor:pointer;
+  height:clamp(92px, 26vw, 150px); padding:6px 4px 8px; border-radius:20px; border:2px solid #5FE3FF;
+  background:radial-gradient(120% 90% at 50% 20%, #2B3C8F 0%, #151E52 70%); box-shadow:0 5px 0 #0A0F2E, 0 10px 20px rgba(0,0,0,.35);
+  transition: transform .15s ease, box-shadow .15s ease, filter .2s ease; -webkit-tap-highlight-color:transparent; overflow:hidden; }
+.kt-c img { flex:1; min-height:0; max-width:92%; object-fit:contain; filter:drop-shadow(0 6px 10px rgba(0,0,0,.5));
+  transition: transform .3s cubic-bezier(.2,.8,.2,1); }
+.kt-c span { color:#FFFFFF; font-weight:900; font-size:clamp(13px, 3.6vw, 18px); line-height:1.1; text-align:center;
+  text-shadow:0 2px 6px rgba(0,0,0,.6); margin-top:4px; }
+.kt-c.on { background:linear-gradient(180deg, #FFE066, #FFB020); border-color:#FFF3B0; box-shadow:0 5px 0 #A86A00, 0 0 22px rgba(255,208,64,.55); }
+.kt-c.on span { color:#2A1600; text-shadow:none; }
+.kt-c.on img { transform:scale(1.08) rotate(-4deg); }
+.kt-c.lock { filter:grayscale(.7) brightness(.6); }
+.kt-c:active { transform:translateY(4px) scale(.97); box-shadow:0 1px 0 #0A0F2E; }
+@media (hover:hover) { .kt-c:hover img { transform:scale(1.12) rotate(4deg); } }
+@media (min-width: 641px) { .kt-c { height:118px; } }
+.kt.sm .kt-c { flex-direction:row; justify-content:center; gap:6px; height:clamp(56px, 15vw, 72px); padding:6px 8px; }
+.kt.sm .kt-c img { flex:0 0 auto; height:78%; max-width:32%; }
+.kt.sm .kt-c span { margin:0; font-size:clamp(11px, 3vw, 16px); text-align:left; overflow-wrap:anywhere; min-width:0; }
+.kt.sm .kt-c { gap:4px !important; padding:6px 5px !important; }
+"""
+_TILES_JS = """
+export default function (component) {
+  const { data, setTriggerValue, parentElement } = component;
+  const old = parentElement.querySelector('.kt'); if (old) old.remove();
+  const box = document.createElement('div'); box.className = 'kt' + (data.small ? ' sm' : '');
+  box.style.setProperty('--n', (data.items || []).length);
+  (data.items || []).forEach((it) => {
+    const c = document.createElement('div');
+    c.className = 'kt-c' + (it.key === data.selected ? ' on' : '') + (it.lock ? ' lock' : '');
+    c.innerHTML = `<img src="${it.img}" alt=""><span>${it.label}</span>`;
+    c.addEventListener('click', () => {
+      try { const A = window.AudioContext || window.webkitAudioContext; const x = window.__epTileCtx || (window.__epTileCtx = new A());
+        const o = x.createOscillator(), g = x.createGain(), t = x.currentTime; o.type = 'triangle';
+        o.frequency.setValueAtTime(520, t); o.frequency.exponentialRampToValueAtTime(1040, t + .12);
+        g.gain.setValueAtTime(.15, t); g.gain.exponentialRampToValueAtTime(.0001, t + .16); o.connect(g); g.connect(x.destination);
+        o.start(t); o.stop(t + .18); } catch (e) {}
+      if (it.key !== data.selected) setTriggerValue('pick', it.key);
+    });
+    box.appendChild(c);
+  });
+  parentElement.appendChild(box);
+}
+"""
+_tiles = st.components.v2.component("english_kid_tiles", css=_TILES_CSS, js=_TILES_JS)
+
+
+def kid_tiles(items: list[dict], selected: str, key: str, small: bool = False):
+    """items: [{'key','label','img', 'lock'?}]. Cartões ilustrados lado a lado; retorna a chave tocada (ou None)."""
+    res = _tiles(key=key, data={"items": items, "selected": selected, "small": small}, on_pick_change=lambda: None)
+    return getattr(res, "pick", None)
+
+
+# --- Álbum de figurinhas (modo infantil): toca para virar e ouvir a curiosidade em inglês -----
+_ALBUM_CSS = """
+.al { font-family:'Nunito',system-ui,sans-serif; color:#F2F5FF; }
+.al-top { display:flex; align-items:center; gap:10px; margin:2px 0 12px; }
+.al-top b { font-size:clamp(18px, 5vw, 24px); font-weight:900; }
+.al-bar { flex:1; height:12px; border-radius:99px; background:rgba(255,255,255,.12); overflow:hidden; }
+.al-bar i { display:block; height:100%; background:linear-gradient(90deg, #FFE066, #FFB020); border-radius:99px; }
+.al h4 { margin:16px 4px 8px; font-size:15px; font-weight:900; color:#AFC0E8; letter-spacing:.04em; text-transform:uppercase; }
+.al-g { display:grid; grid-template-columns:repeat(auto-fill, minmax(clamp(96px, 28vw, 140px), 1fr)); gap:10px; }
+.st { perspective:800px; height:clamp(168px, 46vw, 210px); cursor:pointer; -webkit-tap-highlight-color:transparent; }
+.st-in { position:relative; width:100%; height:100%; transition:transform .6s cubic-bezier(.2,.8,.2,1); transform-style:preserve-3d; }
+.st.flip .st-in { transform:rotateY(180deg); }
+.st-f, .st-b { position:absolute; inset:0; backface-visibility:hidden; -webkit-backface-visibility:hidden; border-radius:18px;
+  display:flex; flex-direction:column; align-items:center; padding:8px 6px; box-shadow:0 5px 0 #0A0F2E, 0 10px 20px rgba(0,0,0,.35); }
+.st-f { justify-content:flex-end; border:3px solid #FFE066;
+  background:radial-gradient(110% 80% at 50% 25%, #3B4FB8 0%, #18215A 75%); }
+.st-f img, .st-f .emo { flex:1; min-height:0; max-width:95%; object-fit:contain; filter:drop-shadow(0 6px 10px rgba(0,0,0,.5)); }
+.st-f .emo { font-size:clamp(48px, 14vw, 72px); display:flex; align-items:center; }
+.st-f span { font-weight:900; font-size:clamp(12px, 3.4vw, 15px); text-align:center; line-height:1.1; margin-top:4px; }
+.st-f small { font-size:11px; color:#FFE066; font-weight:800; }
+.st-b { transform:rotateY(180deg); background:linear-gradient(180deg, #FFF6D6, #FFE8A3); color:#2A1600; justify-content:space-between;
+  border:3px solid #FFB020; text-align:center; overflow:hidden; }
+.st-b p { margin:0; font-size:clamp(10.5px, 2.9vw, 12.5px); line-height:1.25; }
+.st-b p.en { font-weight:800; color:#3A2A8A; }
+.st-b button { border:none; border-radius:99px; padding:5px 12px; font-weight:900; font-size:13px; cursor:pointer;
+  background:#5B47E8; color:#fff; box-shadow:0 3px 0 #2E2380; }
+.st.lock .st-f { border:3px dashed rgba(255,255,255,.25); background:#11173D; }
+.st.lock .st-f img, .st.lock .st-f .emo { filter:brightness(0) opacity(.35); }
+.st.lock .st-f span { color:#8A97C2; }
+.st.lock .st-f small { color:#AFC0E8; font-weight:700; }
+.st.new .st-f { animation: st-new 1.4s ease-in-out 3; }
+@keyframes st-new { 50% { transform:scale(1.06) rotate(-2deg); box-shadow:0 0 26px #FFE066; } }
+"""
+_ALBUM_JS = """
+export default function (component) {
+  const { data, parentElement } = component;
+  const old = parentElement.querySelector('.al'); if (old) old.remove();
+  const items = data.items || [];
+  const got = items.filter(i => i.got).length;
+  const root = document.createElement('div'); root.className = 'al';
+  root.innerHTML = `<div class="al-top"><b>📒 ${got} de ${items.length}</b><div class="al-bar"><i style="width:${Math.round(100*got/Math.max(1,items.length))}%"></i></div></div>`;
+  const say = (t) => { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(t); u.lang = 'en-US'; u.rate = .85; u.pitch = 1.15;
+    const v = speechSynthesis.getVoices().find(v => /en-US/.test(v.lang) && /(Samantha|Ava|Aria|Jenny|Google US)/.test(v.name));
+    if (v) u.voice = v; speechSynthesis.speak(u); } catch (e) {} };
+  const seen = JSON.parse((() => { try { return localStorage.getItem('ep_album_seen') || '[]'; } catch (e) { return '[]'; } })());
+  let group = null, grid = null;
+  items.forEach((it) => {
+    if (it.group !== group) { group = it.group; const h = document.createElement('h4'); h.textContent = group; root.appendChild(h);
+      grid = document.createElement('div'); grid.className = 'al-g'; root.appendChild(grid); }
+    const c = document.createElement('div');
+    c.className = 'st' + (it.got ? '' : ' lock') + (it.got && !seen.includes(it.key) ? ' new' : '');
+    const pic = it.img ? `<img src="${it.img}" alt="">` : `<div class="emo">${it.emoji}</div>`;
+    c.innerHTML = `<div class="st-in"><div class="st-f">${pic}<span>${it.got ? it.en : '???'}</span><small>${it.got ? it.pt : '🔒 ' + it.how}</small></div>
+      <div class="st-b"><p class="en">${it.fact_en}</p><p>${it.fact_pt}</p><button>🔊 Ouvir</button></div></div>`;
+    c.addEventListener('click', (ev) => {
+      if (!it.got) { c.animate([{transform:'translateX(0)'},{transform:'translateX(-6px)'},{transform:'translateX(6px)'},{transform:'translateX(0)'}], {duration:300}); return; }
+      if (ev.target.tagName === 'BUTTON') { ev.stopPropagation(); say(it.fact_en); return; }
+      c.classList.toggle('flip'); c.classList.remove('new');
+      if (c.classList.contains('flip')) { say(it.en + '! ' + it.fact_en);
+        if (!seen.includes(it.key)) { seen.push(it.key); try { localStorage.setItem('ep_album_seen', JSON.stringify(seen)); } catch (e) {} } }
+    });
+    grid.appendChild(c);
+  });
+  parentElement.appendChild(root);
+}
+"""
+_album = st.components.v2.component("english_album", css=_ALBUM_CSS, js=_ALBUM_JS)
+
+
+def album_grid(items: list[dict], key: str = "album") -> None:
+    _album(key=key, data={"items": items})
 
 
 def dive_bg(url: str, surface: bool = True) -> None:

@@ -173,6 +173,10 @@ THEMES = {
         "font": "Exo+2:wght@600;800", "title_font": "'Exo 2', 'Nunito', sans-serif",
         "panel": "rgba(10,12,38,.48)", "edge": "rgba(126,232,255,.35)", "text": "#EAF2FF", "muted": "#AFC0E8",
         "accent": "#38D6F5", "accent2": "#A78BFA", "accent_ink": "#061021",
+        "radius": "22px", "btn_h": "54px",
+        "extra_css": (".stButton button p, button[data-variant] p { font-weight:800 !important; font-size:1.05rem !important; } "
+                      ".stButton button:active, button[data-variant]:active { animation: ep-pop .35s ease !important; } "
+                      "@keyframes ep-pop { 0% { transform:scale(.9) } 55% { transform:scale(1.06) } 100% { transform:scale(1) } }"),
         "overlay": "radial-gradient(120% 80% at 50% 0%, rgba(0,0,0,0) 0%, rgba(4,6,20,.35) 70%)",
     },
 }
@@ -209,10 +213,30 @@ def theme_css(name: str) -> str:
 .pill {{ background:rgba(255,255,255,.08) !important; color:{t['accent2']} !important; border-color:{t['edge']} !important; }}
 /* botões, pílulas e abas */
 .stButton button[kind="secondary"], button[data-variant] {{
-  background:rgba(255,255,255,.07) !important; color:{t['text']} !important; border:1px solid {t['edge']} !important;
-  transition: transform .15s ease, background .2s ease; }}
+  background:rgba(255,255,255,.09) !important; color:{t['text']} !important; border:1px solid {t['edge']} !important;
+  box-shadow:0 4px 0 rgba(0,0,0,.35), 0 6px 14px rgba(0,0,0,.25);
+  transition: transform .12s ease, box-shadow .12s ease, background .2s ease, filter .2s ease; }}
 .stButton button[kind="secondary"] p, button[data-variant] p {{ color:{t['text']} !important; }}
-.stButton button:active, button[data-variant]:active {{ transform:scale(.96); }}
+/* botões com cara de "apertável": sobem no hover, afundam no toque */
+.stButton button, button[data-variant], [data-testid="stFormSubmitButton"] button,
+[data-testid="stLinkButton"] a, [data-testid="stDownloadButton"] button {{
+  border-radius:{t.get('radius', '14px')} !important; min-height:{t.get('btn_h', '44px')};
+  -webkit-tap-highlight-color: transparent; }}
+@media (hover:hover) {{ .stButton button:hover, button[data-variant]:hover, [data-testid="stFormSubmitButton"] button:hover {{
+  transform:translateY(-2px); filter:brightness(1.12); background-color:rgba(255,255,255,.14); }} }}
+.stButton button:active, button[data-variant]:active, [data-testid="stFormSubmitButton"] button:active {{
+  transform:translateY(3px) scale(.97) !important; box-shadow:0 1px 0 rgba(0,0,0,.35) !important; filter:brightness(.95); }}
+.stButton button[kind="primary"], [data-testid="stFormSubmitButton"] button {{ animation: ep-glow 2.6s ease-in-out infinite; }}
+@keyframes ep-glow {{ 0%,100% {{ box-shadow:0 4px 0 rgba(0,0,0,.35), 0 0 0 0 {t['accent']}55; }}
+  50% {{ box-shadow:0 4px 0 rgba(0,0,0,.35), 0 0 22px 4px {t['accent']}66; }} }}
+{t.get('extra_css', '')}
+/* microfone em destaque */
+[data-testid="stAudioInput"] {{ border:2px solid {t['accent']} !important; border-radius:20px !important;
+  background:rgba(255,255,255,.08) !important; animation: ep-mic 1.8s ease-in-out infinite; padding:4px; }}
+[data-testid="stAudioInput"] button {{ transform:scale(1.35); color:{t['accent']} !important; }}
+[data-testid="stAudioInput"] button svg {{ fill:{t['accent']} !important; color:{t['accent']} !important; }}
+@keyframes ep-mic {{ 0%,100% {{ box-shadow:0 0 0 0 {t['accent']}77; }} 60% {{ box-shadow:0 0 0 10px {t['accent']}00, 0 0 24px {t['accent']}55; }} }}
+@media (prefers-reduced-motion: reduce) {{ .stButton button, [data-testid="stAudioInput"] {{ animation:none !important; }} }}
 button[data-variant][aria-checked="true"], button[data-variant][data-selected="true"],
 .stButton button[kind="primary"], [data-testid="stFormSubmitButton"] button {{
   background:linear-gradient(135deg, {t['accent2']}, {t['accent']}) !important; color:{t['accent_ink']} !important;

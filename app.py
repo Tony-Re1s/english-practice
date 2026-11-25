@@ -1461,10 +1461,9 @@ with st.bottom:
             audio_b64 = base64.b64encode(ss.audio[0]).decode() if ss.audio else None
             utter = voice_chat(ss.reply_seq, audio_b64, ss.audio[1] if ss.audio else None, ss.listen_token)
         elif ss.mode == "apertar" and voice.can_listen():
+            st.markdown('<div style="font-weight:800;margin:0 0 4px 4px">🎤 Toque no microfone e fale</div>',
+                        unsafe_allow_html=True)
             rec = st.audio_input("🎙️ Grave sua resposta", key=f"mic_{ss.mic_key}", label_visibility="collapsed")
-    if kid_talk:
-        st.markdown("<style>[data-testid='stAudioInput']{border:2px solid #7EF0B5 !important;border-radius:16px;"
-                    "box-shadow:0 0 18px rgba(126,240,181,.55)}</style>", unsafe_allow_html=True)
     end_clicked = m2.button("🏁 Encerrar", key="end_bottom", width="stretch",
                             help="Encerra a conversa, desliga o microfone e mostra o resumo.")
     typed = st.chat_input("Ou digite sua resposta em inglês...")

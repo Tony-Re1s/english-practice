@@ -591,11 +591,11 @@ def settings_view() -> None:
         with st.expander("🔊 Sons e música", expanded=KIDS_PROFILE):
             snd = sound_cfg()
             changed = False
-            opts = (("music", "🎵 Música de fundo"), ("taps", "👆 Som quando toca nos botões"),
-                    ("fx", "🎉 Sons de acerto, erro e festa"))
+            snd_opts = (("music", "🎵 Música de fundo"), ("taps", "👆 Som quando toca nos botões"),
+                        ("fx", "🎉 Sons de acerto, erro e festa"))
             if current_theme() == "london":
-                opts = opts[:1]
-            for k, lab in opts:
+                snd_opts = snd_opts[:1]
+            for k, lab in snd_opts:
                 v = st.toggle(lab, value=bool(snd[k]) and not snd["muted"], key=f"snd_{k}")
                 if v != (bool(snd[k]) and not snd["muted"]):
                     snd[k], snd["muted"], changed = v, False, True

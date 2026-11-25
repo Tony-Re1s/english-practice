@@ -319,8 +319,9 @@ def dive_bg(url: str, surface: bool = True) -> None:
 # --- Vídeo do YouTube com legenda ligada/desligada --------------------------------------------
 _YT_JS = """
 export default function (component) {
-  const { data, parentElement } = component;
-  const src = `https://www.youtube-nocookie.com/embed/${data.id}?rel=0&modestbranding=1&playsinline=1&hl=en`
+  const { data, parentElement, setTriggerValue } = component;
+  const src = `https://www.youtube-nocookie.com/embed/${data.id}?rel=0&modestbranding=1&playsinline=1&hl=en&enablejsapi=1`
+            + `&origin=${encodeURIComponent(location.origin)}` + (data.autoplay ? '&autoplay=1' : '')
             + (data.cc ? '&cc_load_policy=1&cc_lang_pref=en' : '&cc_load_policy=0');
   let box = parentElement.querySelector('.yt');
   if (box && box.dataset.src === src) return;
@@ -329,6 +330,20 @@ export default function (component) {
   box.innerHTML = `<iframe src="${src}" title="Vídeo" allow="autoplay; encrypted-media; picture-in-picture; fullscreen"
     allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>`;
   parentElement.appendChild(box);
+  const frame = box.querySelector('iframe');
+  // pede ao YouTube para avisar quando o vídeo termina (para tocar o próximo em sequência)
+  frame.addEventListener('load', () => {
+    const hello = () => frame.contentWindow && frame.contentWindow.postMessage(JSON.stringify({ event: 'listening', id: data.id }), '*');
+    hello(); setTimeout(hello, 1000);
+  });
+  if (window.__ytListener) window.removeEventListener('message', window.__ytListener);
+  window.__ytListener = (ev) => {
+    if (!/youtube/.test(ev.origin || '')) return;
+    let m; try { m = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data; } catch (e) { return; }
+    const st = m && m.info && m.info.playerState;
+    if (st === 0 && box.isConnected && !box.dataset.ended) { box.dataset.ended = '1'; setTriggerValue('ended', data.id); }
+  };
+  window.addEventListener('message', window.__ytListener);
 }
 """
 _YT_CSS = """
@@ -339,8 +354,11 @@ _YT_CSS = """
 _yt = st.components.v2.component("english_youtube", css=_YT_CSS, js=_YT_JS)
 
 
-def youtube(video_id: str, captions: bool = True) -> None:
-    _yt(key="yt_player", data={"id": video_id, "cc": bool(captions)})
+def youtube(video_id: str, captions: bool = True, autoplay: bool = False):
+    """Mostra o vídeo. Retorna o id do vídeo quando ele termina (para tocar o próximo)."""
+    res = _yt(key="yt_player", data={"id": video_id, "cc": bool(captions), "autoplay": bool(autoplay)},
+              on_ended_change=lambda: None)
+    return getattr(res, "ended", None)
 
 
 # --- Resumo da conversa em PDF ---------------------------------------------------------------

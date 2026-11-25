@@ -342,3 +342,34 @@ def set_series_level(series: str, level: str) -> None:
 
 def delete_series(series: str) -> None:
     _run("delete from ep_videos where coalesce(series, 'Avulsos') = %s", (series,))
+
+
+# --- modo infantil: dias jogados (sequência 🔥 e meta do dia) ---------------------------------
+def kid_days(user_email: str, level: str) -> list:
+    """Datas (horário de Brasília) em que a pessoa concluiu pelo menos um planeta, da mais recente para a mais antiga."""
+    rows = _run("""select distinct (ts at time zone 'America/Sao_Paulo')::date as d from ep_exercise_done
+                   where user_email = %s and level = %s order by d desc limit 400""", (user_email, level), fetch=True)
+    return [r["d"] for r in rows]
+
+
+def kid_today_nums(user_email: str, level: str) -> set:
+    rows = _run("""select distinct num from ep_exercise_done where user_email = %s and level = %s
+                   and (ts at time zone 'America/Sao_Paulo')::date = (now() at time zone 'America/Sao_Paulo')::date""",
+                (user_email, level), fetch=True)
+    return {r["num"] for r in rows}
+
+
+def week_report(user_email: str) -> dict:
+    """Resumo dos últimos 7 dias para a família."""
+    ex = _run("""select level, num, max(score) as score, max(total) as total, max(ts) as ts from ep_exercise_done
+                 where user_email = %s and ts > now() - interval '7 days' group by level, num order by ts""",
+              (user_email,), fetch=True)
+    vids = _run("""select count(*) as n from ep_video_done where user_email = %s and ts > now() - interval '7 days'""",
+                (user_email,), fetch=True)
+    talks = _run("""select count(*) as n, coalesce(sum(turns), 0) as turns from (
+                      select s.id, count(t.*) filter (where t.role = 'user') as turns from ep_sessions s
+                      left join ep_turns t on t.session_id = s.id
+                      where s.user_email = %s and s.started_at > now() - interval '7 days' group by s.id) x""",
+                 (user_email,), fetch=True)
+    return {"exercises": ex, "videos": vids[0]["n"] if vids else 0,
+            "talks": talks[0]["n"] if talks else 0, "talk_turns": talks[0]["turns"] if talks else 0}

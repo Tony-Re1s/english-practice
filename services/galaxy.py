@@ -18,6 +18,20 @@ CSS = """
     radial-gradient(120% 80% at 80% 0%, #3B2A7A 0%, transparent 60%),
     radial-gradient(100% 70% at 0% 100%, #0F5C6E 0%, transparent 65%); }
 .gx-top { display:flex; align-items:flex-start; gap:10px; margin-bottom:10px; }
+.gx-botw { position:relative; flex-shrink:0; }
+.gx-hat { position:absolute; top:-14px; left:50%; transform:translateX(-50%) rotate(-8deg); font-size:26px; line-height:1;
+  filter:drop-shadow(0 2px 3px rgba(0,0,0,.5)); animation: gx-float 3s ease-in-out infinite; }
+.gx-party .gx-bot { animation: gx-wiggle .5s ease-in-out 4; }
+@keyframes gx-wiggle { 0%,100% { transform: rotate(0) } 25% { transform: rotate(-10deg) translateY(-4px) } 75% { transform: rotate(10deg) translateY(-4px) } }
+.gx-oops .gx-bot { animation: gx-shake .4s ease-in-out 2; }
+@keyframes gx-shake { 0%,100% { transform: translateX(0) } 30% { transform: translateX(-5px) } 70% { transform: translateX(5px) } }
+.gx-hud { display:flex; flex-wrap:wrap; gap:6px; margin:0 4px 10px; }
+.gx-hud span { font-size:12.5px; font-weight:800; padding:4px 10px; border-radius:999px; background:rgba(255,255,255,.12);
+  border:1px solid rgba(255,255,255,.18); }
+.gx-hud span.ok { background:linear-gradient(135deg,#7EF0B5,#2FBF83); color:#05301E; border-color:transparent; }
+.gx-prog { height:8px; border-radius:99px; background:rgba(255,255,255,.12); overflow:hidden; margin:0 4px 4px; }
+.gx-prog i { display:block; height:100%; border-radius:99px; background:linear-gradient(90deg,#A78BFA,#38D6F5); }
+.gx-progt { font-size:12px; opacity:.85; margin:0 4px 10px; }
 .gx-bot { width:64px; height:72px; flex-shrink:0; animation: gx-float 3s ease-in-out infinite;
   background-size:contain; background-repeat:no-repeat; background-position:center bottom; filter:drop-shadow(0 6px 12px rgba(0,0,0,.45)); }
 .gx-party .gx-bot { width:84px; height:92px; }
@@ -54,25 +68,46 @@ CSS = """
 .gx-party { position:relative; overflow:hidden; }
 .gx-party i { position:absolute; top:-20px; font-style:normal; animation: gx-fall 1.8s ease-in forwards; }
 @keyframes gx-fall { to { transform: translateY(240px) rotate(200deg); opacity:0 } }
-@media (prefers-reduced-motion: reduce) { .gx-bot, .gx-ship, .gx-p.cur, .gx-party i, .gx-p.sun { animation:none } }
+@media (prefers-reduced-motion: reduce) { .gx-bot, .gx-ship, .gx-p.cur, .gx-party i, .gx-p.sun, .gx-hat { animation:none } }
+@media (min-width: 700px) { .gx-map { max-width:560px; margin:0 auto; } }
 """
 
 JS = r"""
 const IMG = 'app/static/theme/';
+function sfx(kind) {
+  // efeitos sonoros gerados na hora (Web Audio): nada para baixar
+  try {
+    const C = window.__gxCtx || (window.__gxCtx = new (window.AudioContext || window.webkitAudioContext)());
+    if (C.state === 'suspended') C.resume();
+    const t = C.currentTime, g = C.createGain(); g.connect(C.destination);
+    const tone = (f, st, du, type = 'sine', vol = .18) => {
+      const o = C.createOscillator(), e = C.createGain(); o.type = type; o.frequency.setValueAtTime(f, t + st);
+      e.gain.setValueAtTime(0, t + st); e.gain.linearRampToValueAtTime(vol, t + st + .02);
+      e.gain.exponentialRampToValueAtTime(.001, t + st + du); o.connect(e); e.connect(g); o.start(t + st); o.stop(t + st + du + .05); return o; };
+    if (kind === 'win') { [523, 659, 784, 1047].forEach((f, i) => tone(f, i * .09, .25, 'triangle')); }
+    else if (kind === 'oops') { const o = tone(330, 0, .35, 'sine', .14); o.frequency.exponentialRampToValueAtTime(180, t + .35); }
+    else if (kind === 'whoosh') { const o = tone(180, 0, .6, 'sawtooth', .06); o.frequency.exponentialRampToValueAtTime(900, t + .55); }
+    else if (kind === 'tap') { tone(880, 0, .08, 'square', .05); }
+  } catch (e) {}
+}
 export default function (component) {
   const { data, setTriggerValue, parentElement } = component;
   const root = parentElement;
   const old = root.querySelector('.gx'); if (old) old.remove();
   const d = data || {};
   const box = document.createElement('div');
-  box.className = 'gx' + (d.party ? ' gx-party' : '');
+  box.className = 'gx' + (d.party ? ' gx-party' : '') + (d.oops ? ' gx-oops' : '');
+  if (d.sound && root.__lastSound !== d.sound_key) { root.__lastSound = d.sound_key; setTimeout(() => sfx(d.sound), 120); }
   const stars = n => '⭐'.repeat(n) + '☆'.repeat(3 - n);
   const bot = IMG + (d.party ? 'robot_party.webp' : 'robot_wave.webp');
-  let html = `<div class="gx-top"><div class="gx-bot" style="background-image:url('${bot}')"></div>
+  let html = `<div class="gx-top"><div class="gx-botw"><div class="gx-bot" style="background-image:url('${bot}')"></div>
+    ${d.hat ? `<span class="gx-hat">${d.hat}</span>` : ''}</div>
     <div class="gx-say">${d.say || ''}${d.sub ? `<small>${d.sub}</small>` : ''}</div></div>`;
   if (d.planets && d.planets.length) {
     if (d.galaxy) html += `<div class="gx-title">🌌 ${d.galaxy}<small>${d.where || ''}</small></div>`;
     html += `<div class="gx-stats"><span>${d.ship || '🚀'} ${d.name || ''}</span><span>⭐ ${d.total_stars || 0}</span></div>`;
+    if (d.hud && d.hud.length) html += '<div class="gx-hud">' + d.hud.map(h => `<span class="${h.ok ? 'ok' : ''}">${h.t}</span>`).join('') + '</div>';
+    if (d.progress != null) html += `<div class="gx-prog"><i style="width:${Math.round(d.progress * 100)}%"></i></div><div class="gx-progt">${d.progress_text || ''}</div>`;
     // caminho em "cobrinha": 1 2 3 / 6 5 4 / 7 8 9 / 10 no meio
     const p = d.planets, order = [];
     for (let r = 0; r * 3 < Math.min(9, p.length); r++) {
@@ -103,7 +138,7 @@ export default function (component) {
     // a câmera "mergulha" no planeta: o mapa inteiro aproxima a partir do planeta tocado
     const r = b.getBoundingClientRect(), R = box.getBoundingClientRect();
     box.style.transformOrigin = `${r.left - R.left + r.width / 2}px ${r.top - R.top + r.height / 2}px`;
-    b.classList.add('zoom'); box.classList.add('dive');
+    b.classList.add('zoom'); box.classList.add('dive'); sfx('whoosh');
     setTimeout(() => setTriggerValue('pick', parseInt(b.dataset.n, 10)), 600);
   }));
   if (d.party) {
@@ -136,17 +171,22 @@ def passed(score: int, total: int) -> bool:
 
 
 def galaxy_map(planets: list[dict], say: str, sub: str = "", name: str = "", ship: str = "🚀",
-               total_stars: int = 0, foot: str = "", galaxy: str = "", where: str = "", key: str = "galaxy"):
+               total_stars: int = 0, foot: str = "", galaxy: str = "", where: str = "", key: str = "galaxy",
+               hat: str = "", hud: list | None = None, progress: float | None = None, progress_text: str = ""):
     """Mostra o mapa. Retorna o nº do planeta tocado (ou None)."""
     res = _component(key=key, data={"planets": planets, "say": say, "sub": sub, "name": name, "ship": ship,
-                                    "total_stars": total_stars, "foot": foot, "galaxy": galaxy, "where": where},
+                                    "total_stars": total_stars, "foot": foot, "galaxy": galaxy, "where": where,
+                                    "hat": hat, "hud": hud or [], "progress": progress, "progress_text": progress_text},
                      on_pick_change=lambda: None)
     return getattr(res, "pick", None)
 
 
-def mascot(say: str, sub: str = "", party: bool = False, key: str = "mascot") -> None:
-    """Só o robozinho falando (com chuva de estrelas quando party=True)."""
-    _component(key=key, data={"say": say, "sub": sub, "party": party})
+def mascot(say: str, sub: str = "", party: bool = False, key: str = "mascot", hat: str = "",
+           oops: bool = False, sound: bool = True) -> None:
+    """Só o robozinho falando (com chuva de estrelas e som quando party=True; balança e faz 'oops' quando oops=True)."""
+    snd = ("win" if party else "oops" if oops else None) if sound else None
+    _component(key=key, data={"say": say, "sub": sub, "party": party, "oops": oops, "hat": hat,
+                              "sound": snd, "sound_key": key})
 
 
 # --- Dentro do planeta: trilha de paradas e montar frase ------------------------------------

@@ -166,11 +166,29 @@ def _norm(s: str) -> str:
     return re.sub(r"\s+", " ", s)
 
 
-def check_answer(q: dict, given: str | None) -> bool:
+def _dist(a: str, b: str) -> int:
+    """Distância de edição (quantas letras trocar/tirar/pôr)."""
+    prev = list(range(len(b) + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[-1]
+
+
+def check_answer(q: dict, given: str | None, lenient: bool = False) -> bool:
+    """lenient (modo infantil): aceita um errinho de digitação em palavras de 4+ letras (ex.: 'bannana')."""
     if given is None:
         return False
     ok = {_norm(q.get("answer"))} | {_norm(a) for a in (q.get("accept") or [])}
-    return _norm(given) in ok
+    g = _norm(given)
+    if g in ok:
+        return True
+    if lenient and q.get("type") == "fill":
+        g2 = g.replace(" ", "")
+        return any(len(a) >= 4 and _dist(g2, a.replace(" ", "")) <= 1 for a in ok)
+    return False
 
 
 # --- Vídeos -------------------------------------------------------------------------------
@@ -293,10 +311,18 @@ QUESTIONS_TOOL = {
 }
 
 
-def video_questions(video_json: str, cefr: str, api_key: str | None, avoid: list[str] | None = None) -> tuple[list[str], dict]:
-    system = (f"You write listening comprehension questions for a {cefr} learner who just watched a video. "
-              "Use simple English at that level. Ask about facts, details and the meaning of key expressions; "
-              "include one personal opinion question at the end.")
+def video_questions(video_json: str, cefr: str, api_key: str | None, avoid: list[str] | None = None,
+                    kids: bool = False) -> tuple[list[str], dict]:
+    if kids:
+        system = ("You write 4 super simple questions for a Brazilian child aged 7-8 who just watched an English "
+                  "cartoon lesson. Write each question in simple Brazilian Portuguese, asking about English words "
+                  "or short phrases from the video (e.g. 'Como se diz *gato* em inglês?', 'O que o menino falou "
+                  "quando chegou? (Hello / Goodbye)'). Put the possible answers in parentheses when it helps. "
+                  "One-word or very short answers only. Friendly, with an emoji in each question.")
+    else:
+        system = (f"You write listening comprehension questions for a {cefr} learner who just watched a video. "
+                  "Use simple English at that level. Ask about facts, details and the meaning of key expressions; "
+                  "include one personal opinion question at the end.")
     user = f"VIDEO NOTES (JSON):\n{video_json}\n\nWrite 5 NEW questions."
     if avoid:
         user += "\nDo not repeat these questions:\n- " + "\n- ".join(avoid[-15:])
@@ -330,9 +356,12 @@ GRADE_TOOL = {
 
 
 def grade_answers(video_json: str, questions: list[str], answers: list[str], cefr: str,
-                  api_key: str | None) -> tuple[dict, dict]:
+                  api_key: str | None, kids: bool = False) -> tuple[dict, dict]:
     system = (f"You are a kind English teacher checking a {cefr} learner's answers about a video they watched. "
               "Judge whether each answer shows understanding (content), even with small grammar mistakes. "
               "Opinion questions are correct if they are understandable answers. Be encouraging.")
+    if kids:
+        system += (" The learner is a 7-8 year-old child: accept small spelling mistakes, answers in Portuguese when "
+                   "the question allows it, and write all feedback in very simple, cheerful Brazilian Portuguese.")
     qa = "\n".join(f"{i + 1}. Q: {q}\n   A: {a or '(no answer)'}" for i, (q, a) in enumerate(zip(questions, answers)))
     return _tool_call(system, f"VIDEO NOTES (JSON):\n{video_json}\n\nANSWERS:\n{qa}", GRADE_TOOL, api_key, max_tokens=1200)

@@ -76,3 +76,14 @@ def stop(num: int) -> dict:
             "imaginary": g["imaginary"], "galaxy": g["name"],
             "img": _img(key, "planet") or f"{URL}planet_sun.webp",
             "surf": _img(key, "surf")}
+
+
+# Como se fala (aproximação em português, para a criança conseguir dizer o nome do planeta)
+PRON = {
+    "mercury": "MÉR-kiu-ri", "venus": "VÍ-nâs", "earth": "ÂRF", "mars": "MÁRS", "jupiter": "DJÚ-pi-târ",
+    "saturn": "SÉ-târn", "uranus": "IÚ-ra-nâs", "neptune": "NÉP-tchun", "pluto": "PLÚ-tou", "sun": "dâ SÂN",
+    "proxima_b": "PRÓK-si-ma BI", "trappist_1e": "TRÉ-pist UÂN I", "kepler_452b": "KÉ-plâr 452 BI",
+    "kepler_22b": "KÉ-plâr 22 BI", "kepler_16b": "KÉ-plâr 16 BI", "cancri_55e": "55 KÉN-krai I",
+    "hd_189733b": "eitch-DI 189733 BI", "pegasi_51b": "51 PÉ-ga-zai BI", "k2_18b": "KEI-TU 18 BI",
+    "sgr_a": "sa-dji-TÉ-ri-âs EI-STÁR",
+}

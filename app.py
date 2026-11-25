@@ -2,6 +2,7 @@
 
 import base64
 import json
+import re
 from html import escape as html_escape
 import uuid
 from datetime import datetime
@@ -13,7 +14,7 @@ from config import (DEFAULT_LEVEL, LEVELS, LIVE_MAX_SESSION_MIN, LIVE_MODEL, LIV
                     MAX_HISTORY_TURNS, PROVIDER_LABEL, PROVIDERS)
 from prompts import (FREE_TALK_OPEN, FREE_TALK_ROLE, LIVE_SYSTEM, SCENARIOS, START_MESSAGE, TOPIC_ROLE,
                      TUTOR_SYSTEM)
-from services import galaxy, nav, space, db, learn, live, llm, users, voice
+from services import galaxy, nav, rewards, space, db, learn, live, llm, users, voice
 from syllabus import topic_for
 from services.voice_chat import voice_chat
 
@@ -239,6 +240,9 @@ def handle_audio(audio: bytes, mime: str) -> None:
             ctx = ""
             if last:
                 ctx = last["text"] + " " + " ".join(last.get("suggestions") or [])
+            m = re.search(r"use mostly these words and structures: (.*?)\. Ask", ss.get("role") or "")
+            if m:   # modo infantil: as palavras da fase ajudam a entender a voz de criança
+                ctx = m.group(1) + ". " + ctx
             heard, provider = voice.transcribe(audio, mime, log=log, context=ctx)
         ss.voice_used = f"ouvido por: {provider}"
         ss.last_error = ""
@@ -327,6 +331,33 @@ def bottom_nav(bar: bool = True) -> None:
 
 
 # --- Tela: histórico -------------------------------------------------------------
+def family_report(who: str) -> str:
+    """Texto curto e animado sobre os últimos 7 dias, pronto para mandar para a família."""
+    r = db.week_report(who)
+    name = who.split("@")[0]
+    kid_ex = [e for e in r["exercises"] if LEVELS.get(e["level"], {}).get("kids")]
+    lines = [f"🌟 Semana de inglês — {name}", ""]
+    if kid_ex:
+        ok = [e for e in kid_ex if galaxy.passed(e["score"], e["total"])]
+        stars = sum(galaxy.stars_for(e["score"], e["total"]) for e in kid_ex)
+        lines.append(f"🚀 Planetas explorados: {len(ok)} ({stars} ⭐)")
+        for e in ok[-6:]:
+            info = space.stop(e["num"])
+            lines.append(f"   • {info['en']} — {topic_for(e['level'], e['num'])[0]}")
+        days = db.kid_days(who, kid_ex[0]["level"])
+        lines.append(f"🔥 Sequência: {rewards.streak(days)} dia(s) seguidos")
+    other = [e for e in r["exercises"] if not LEVELS.get(e["level"], {}).get("kids")]
+    if other:
+        lines.append(f"📝 Exercícios feitos: {len(other)}")
+    lines.append(f"💬 Conversas: {r['talks']} ({r['talk_turns']} falas em inglês)")
+    lines.append(f"🎬 Vídeos com perguntas: {r['videos']}")
+    if not r["exercises"] and not r["talks"] and not r["videos"]:
+        lines.append("Ainda não teve atividade nesta semana — que tal uma missão hoje? 🚀")
+    else:
+        lines += ["", "Parabéns pelo esforço! 👏 Continue assim!"]
+    return "\n".join(lines)
+
+
 def history_view() -> None:
     ui.hero("📊 Histórico e uso", "Quais IAs foram usadas, quanto custou (estimado) e suas conversas anteriores.")
     if not db.enabled():
@@ -338,6 +369,11 @@ def history_view() -> None:
     if prof.is_admin:
         people = sorted(set(db.known_users()) | {email})
         who = st.selectbox("Pessoa", people, index=people.index(email))
+    with st.expander("📨 Resumo da semana para a família", expanded=False):
+        txt = family_report(who)
+        st.text_area("Resumo", txt, height=220, label_visibility="collapsed")
+        from urllib.parse import quote
+        st.link_button("📲 Enviar no WhatsApp", "https://wa.me/?text=" + quote(txt), width="stretch")
     days = st.segmented_control("Período", [7, 30, 90], default=30, format_func=lambda d: f"{d} dias") or 30
     df = pd.DataFrame(db.usage_by_provider(who, days))
     if df.empty:
@@ -566,6 +602,37 @@ def kids_next(done: dict) -> int:
     return nxt
 
 
+@st.cache_resource
+def _pregen_state() -> dict:
+    return {"running": set()}
+
+
+def pregen_missions(lvl: str, nums: list[int]) -> None:
+    """Prepara as próximas missões em segundo plano: quando ele tocar no planeta, já está pronto (sem espera)."""
+    if not db.enabled():
+        return
+    import threading
+    state = _pregen_state()
+    lv, key = LEVELS[lvl], prof.keys.get("anthropic")
+    for n in nums:
+        tag = f"{lvl}:{n}"
+        if tag in state["running"] or db.get_exercise(lvl, n):
+            continue
+        state["running"].add(tag)
+
+        def work(n=n, tag=tag):
+            try:
+                topic, rnd = topic_for(lvl, n)
+                ex, _u = learn.make_kids_exercise(lv["guide"], topic, rnd, key)
+                if not db.get_exercise(lvl, n):
+                    db.save_exercise(lvl, n, topic, ex)
+            except Exception as e:
+                print(f"[pré-missão] {tag}: {e}", flush=True)
+            finally:
+                state["running"].discard(tag)
+        threading.Thread(target=work, daemon=True).start()
+
+
 def kids_galaxy(lvl: str, done: dict) -> None:
     """Nível Criança: o mapa da galáxia. Tocar num planeta = mergulhar nele (abre o exercício direto)."""
     name, ship = kids_astro()
@@ -573,6 +640,16 @@ def kids_galaxy(lvl: str, done: dict) -> None:
         astro_form()
         return
     nxt = kids_next(done)
+    pregen_missions(lvl, [nxt, nxt + 1])
+    shop = rewards.load_shop(email)
+    hat, ship_eq = rewards.equipped_emoji(shop, "hat"), rewards.equipped_emoji(shop, "ship") or ship
+    stars = sum(galaxy.stars_for(*v) for v in done.values())
+    wallet = stars - shop["spent"]
+    days = db.kid_days(email, lvl) if db.enabled() else []
+    today_nums = db.kid_today_nums(email, lvl) if db.enabled() else set()
+    streak = rewards.streak(days)
+    limit_hit = KIDS_PROFILE and len(today_nums) >= rewards.DAILY_LIMIT
+
     n_blocks = max(3, (nxt - 1) // 10 + 2)
     names = [space.galaxy_name(i) for i in range(n_blocks)]
     blk = st.segmented_control("Galáxia", names, default=names[(nxt - 1) // 10], key="kid_blk",
@@ -584,25 +661,63 @@ def kids_galaxy(lvl: str, done: dict) -> None:
         info = space.stop(n)
         planets.append({"num": n, "name": info["en"], "img": info["img"], "done": n in done,
                         "stars": galaxy.stars_for(*done[n]) if n in done else 0,
-                        "locked": n > nxt and not prof.is_admin, "current": n == nxt, "selected": False,
+                        "locked": (n > nxt or (limit_hit and n not in done)) and not prof.is_admin,
+                        "current": n == nxt, "selected": False,
                         "boss": ("sun" if info["key"] == "sun" else "big") if info["boss"] else None})
-    stars = sum(galaxy.stars_for(*v) for v in done.values())
     first, last = b * 10 + 1, b * 10 + 10
-    if first <= nxt <= last:
-        target = space.stop(nxt)["en"]
-        say, sub = f"Hi, {name}! Let's fly to {target}!", f"Oi, {name}! Vamos voar até {space.stop(nxt)['pt']}! Toque no planeta."
+    if limit_hit:
+        say, sub = "Mission complete for today! 🌙", (f"Você já explorou {len(today_nums)} planetas hoje, {name}! "
+                                                      "Descanse e volte amanhã para continuar a viagem.")
+    elif first <= nxt <= last:
+        say, sub = f"Hi, {name}! Let's fly to {space.stop(nxt)['en']}!", f"Toque no planeta para entrar!"
     elif nxt > last:
         say, sub = "Wow! You explored this whole galaxy! 🌟", "Uau! Você explorou esta galáxia inteira!"
     else:
         say, sub = "This galaxy is still far away… 🔭", f"Primeiro explore {space.stop(nxt)['pt']}."
-    foot = "Acerte pelo menos metade para liberar o próximo planeta ✨"
-    if g["imaginary"]:
-        foot = "Em Andrômeda ainda não conhecemos planetas de verdade: estes são imaginários! ✨ " + foot
-    pick = galaxy.galaxy_map(planets, say, sub, name=name, ship=ship, total_stars=stars, foot=foot,
-                             galaxy=g["name"], where=g["where"], key=f"gx_{b}")
+    goal_ok = len(today_nums) >= rewards.DAILY_GOAL
+    hud = [{"t": f"🔥 {streak} {'dia' if streak == 1 else 'dias'} seguidos" if streak else "🔥 Comece sua sequência!"},
+           {"t": "🎯 Meta de hoje: feita! ✓" if goal_ok else "🎯 Meta de hoje: 1 planeta", "ok": goal_ok},
+           {"t": f"💰 {wallet} ⭐ para gastar"}]
+    in_gal = sum(1 for n in range(first, last + 1) if n in done)
+    left = 10 - in_gal
+    boss = space.stop(last)["pt"]
+    prog_text = (f"Faltam {left} {'planeta' if left == 1 else 'planetas'} para chegar ao {boss}!" if left
+                 else "Galáxia completa! 🏆")
+    foot = "Em Andrômeda ainda não conhecemos planetas de verdade: estes são imaginários! ✨" if g["imaginary"] else ""
+    pick = galaxy.galaxy_map(planets, say, sub, name=name, ship=ship_eq, total_stars=stars, foot=foot,
+                             galaxy=g["name"], where=g["where"], key=f"gx_{b}", hat=hat, hud=hud,
+                             progress=in_gal / 10, progress_text=prog_text)
     if pick:
         ss.kid_inside, ss.kid_lvl = int(pick), lvl
         st.rerun()
+
+    c1, c2 = st.columns(2)
+    with c1.popover("🛍️ Loja do Bip", width="stretch"):
+        st.markdown(f"**Você tem {wallet} ⭐** · troque suas estrelas por coisas para o Bip!")
+        for kind, title in (("hat", "Chapéus do Bip"), ("ship", "Naves")):
+            st.caption(title)
+            cols = st.columns(3)
+            for j, it in enumerate([i for i in rewards.SHOP if i["kind"] == kind]):
+                owned = it["id"] in shop["owned"]
+                using = shop.get(kind) == it["id"]
+                label = f"{it['emoji']} {it['name']}\n" + ("✓ usando" if using else "usar" if owned else f"{it['price']} ⭐")
+                if cols[j % 3].button(label, key=f"shop_{it['id']}", width="stretch", disabled=using):
+                    ok, msg = rewards.buy(email, shop, it["id"], stars)
+                    ss.shop_msg = msg
+                    st.rerun()
+        if ss.get("shop_msg"):
+            st.success(ss.pop("shop_msg"))
+    with c2.popover(f"📒 Meu álbum ({len([n for n in done if galaxy.passed(*done[n])])})", width="stretch"):
+        got = sorted(n for n in done if galaxy.passed(*done[n]))
+        if not got:
+            st.caption("Explore planetas para colecionar aqui! 🪐")
+        else:
+            html_cards = "".join(
+                f'<div style="text-align:center"><img src="{space.stop(n)["img"]}" style="width:64px;height:64px">'
+                f'<div style="font-weight:800;font-size:13px">{space.stop(n)["en"]}</div>'
+                f'<div style="font-size:11px">{"⭐" * galaxy.stars_for(*done[n])}</div></div>' for n in got)
+            st.markdown(f'<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:10px">'
+                        f'{html_cards}</div>', unsafe_allow_html=True)
 
 
 def _say(text: str) -> None:
@@ -628,9 +743,13 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
     if st.button("🛰️ Voltar para a galáxia", key="kp_back"):
         ss.kid_inside = None
         st.rerun()
+    pron = space.PRON.get(info["key"], "")
     st.markdown(f'<div class="kp-head"><img src="{info["img"]}" alt=""><div><h2>{info["en"]}</h2>'
-                f'<small>{info["pt"]} · {info["galaxy"]} · parada {num}</small></div></div>'
-                f'<div class="kp-fact">💡 {info["fact"]}</div>', unsafe_allow_html=True)
+                f'<small>{"🗣️ fala-se <b>" + pron + "</b> · " if pron else ""}{info["pt"]} · {info["galaxy"]}</small>'
+                f'</div></div><div class="kp-fact">💡 {info["fact"]}</div>', unsafe_allow_html=True)
+    if st.button(f"🔊 Como se fala {info['en']}?", key=f"kp_name_{num}"):
+        _say(info["en"])
+    hat = rewards.equipped_emoji(rewards.load_shop(email), "hat")
 
     topic, rnd = topic_for(lvl, num)
     cache = st.session_state.setdefault("ex_cache", {})
@@ -664,6 +783,7 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
                 unsafe_allow_html=True)
 
     if stt["done"]:
+        stt.pop("flash", None)
         score = sum(1 for v in stt["res"].values() if v)
         total = len(qs)
         if galaxy.passed(score, total):
@@ -686,20 +806,28 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
         return
 
     i = stt["i"]
-    if i == 0:   # briefing da missão: a gramática, do jeito de sempre
-        st.markdown(f'<div class="kp-card"><div style="color:#AFC0E8;font-weight:800">📜 MISSÃO</div>'
-                    f'<div class="kp-q">{html_escape(ex.get("title", topic))}</div></div>', unsafe_allow_html=True)
-        st.markdown(ex.get("explanation_pt", ""))
-        for e in ex.get("examples", []):
-            st.markdown(f"- *{e}*")
+    if i == 0:   # briefing: o Bip conta a missão em poucas palavras e fala os exemplos
+        galaxy.mascot(f"📜 {ex.get('title', topic)}", ex.get("explanation_pt", ""), hat=hat, sound=False,
+                      key=f"kp_brief_{num}")
+        chips = "".join(f'<span style="display:inline-block;margin:4px;padding:8px 14px;border-radius:999px;'
+                        f'background:rgba(255,255,255,.12);border:1px solid rgba(126,232,255,.4);font-weight:800;'
+                        f'font-size:1.1rem">{html_escape(e)}</span>' for e in ex.get("examples", [])[:3])
+        st.markdown(f'<div style="text-align:center;margin:6px 0 10px">{chips}</div>', unsafe_allow_html=True)
+        said = ss.setdefault("kp_said", set())
+        if f"{key}:0" not in said:
+            said.add(f"{key}:0")
+            _say(". ".join(ex.get("examples", [])[:3]))
         c1, c2 = st.columns([1, 2])
         if c1.button("🔊 Ouvir", width="stretch", key=f"kp_say0_{num}"):
             _say(". ".join(ex.get("examples", [])[:3]))
-        if c2.button("🚀 Começar a missão", type="primary", width="stretch", key=f"kp_go_{num}"):
+        if c2.button("🚀 Vamos!", type="primary", width="stretch", key=f"kp_go_{num}"):
             stt["i"] = 1
             st.rerun()
         return
 
+    if stt.get("flash") is not None:   # comemoração rápida do acerto anterior
+        galaxy.mascot("Great job! ⭐", f"Isso mesmo! {stt.pop('flash')}", party=True, hat=hat,
+                      key=f"kp_flash_{num}_{i}")
     q = qs[i - 1]
     prompt = q.get("prompt", "")
     g = ((num - 1) // 10) % 3          # galáxia 1: instrução em português; 2: inglês + português; 3: inglês
@@ -726,27 +854,37 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
     if q.get("hint_pt") and c2.button("🇧🇷 O que quer dizer?", key=f"kp_hint_{num}_{i}", width="stretch"):
         st.info(q["hint_pt"], icon="💡")
 
+    def finish_mission() -> None:
+        stt["done"] = True
+        score = sum(1 for v in stt["res"].values() if v)
+        if db.enabled():
+            db.exercise_done(email, lvl, num, score, len(qs), {str(k): v for k, v in stt["ans"].items()})
+
     def answer(given: str) -> None:
-        ok = learn.check_answer(q, given)
+        ok = learn.check_answer(q, given, lenient=True)
         stt["res"][i] = ok
         stt["ans"][i] = given
+        if ok:   # sem botão: a nave já avança e o Bip comemora na próxima tela
+            stt["flash"] = q.get("explain_pt", "")
+            if i == len(qs):
+                finish_mission()
+            else:
+                stt["i"] = i + 1
         st.rerun()
 
     if i in stt["res"]:
         ok = stt["res"][i]
         if ok:
-            galaxy.mascot("Great job! ⭐", f"Isso mesmo! {q.get('explain_pt', '')}", party=True, key=f"kp_fb_{num}_{i}")
+            galaxy.mascot("Great job! ⭐", f"Isso mesmo! {q.get('explain_pt', '')}", party=True, key=f"kp_fb_{num}_{i}",
+                          hat=hat)
         else:
             galaxy.mascot("Oops! Let's learn it 💡", f"A resposta é: {q['answer']}. {q.get('explain_pt', '')}",
-                          key=f"kp_fb_{num}_{i}")
+                          key=f"kp_fb_{num}_{i}", oops=True, hat=hat)
         last = i == len(qs)
         if st.button("🏁 Ver resultado" if last else "🚀 Próxima parada", type="primary", width="stretch",
                      key=f"kp_nx_{num}_{i}"):
             if last:
-                stt["done"] = True
-                score = sum(1 for v in stt["res"].values() if v)
-                if db.enabled():
-                    db.exercise_done(email, lvl, num, score, len(qs), {str(k): v for k, v in stt["ans"].items()})
+                finish_mission()
             else:
                 stt["i"] = i + 1
             st.rerun()
@@ -770,6 +908,9 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
         if got:
             answer(got)
     else:
+        ans_words = str(q.get("answer", ""))
+        if st.button("💡 Me dá uma dica", key=f"kp_tip_{num}_{i}"):
+            st.info("Começa assim: **" + " ".join(w[0] + " _" * (len(w) - 1) for w in ans_words.split()) + "**", icon="💡")
         with st.form(f"kp_fill_{num}_{i}"):
             typed = st.text_input("Escreva a resposta em inglês ✍️", key=f"kp_in_{num}_{i}")
             if st.form_submit_button("🚀 Confirmar", type="primary", width="stretch") and typed.strip():
@@ -944,8 +1085,14 @@ def videos_tab(lvl: str) -> None:
     v = vids[idx]
     mid.markdown(f'<div class="vid-title">{"✅ " if v["id"] in done else ""}{html_escape(v["title"])}'
                  f'<small>{idx + 1} de {len(vids)}</small></div>', unsafe_allow_html=True)
-    cc = st.toggle("Legendas em inglês", value=ss.get("vid_cc", True), key="vid_cc")
-    ui.youtube(v["youtube_id"], captions=cc)
+    t1, t2 = st.columns(2)
+    cc = t1.toggle("Legendas em inglês", value=ss.get("vid_cc", True), key="vid_cc")
+    seq = t2.toggle("Assistir em sequência", value=ss.get("vid_seq", bool(LEVELS[lvl].get("kids"))), key="vid_seq")
+    ended = ui.youtube(v["youtube_id"], captions=cc, autoplay=ss.pop("vid_autoplay", False))
+    if ended == v["youtube_id"] and seq and idx < len(vids) - 1:
+        ss[ikey] = idx + 1
+        ss.vid_autoplay = True
+        st.rerun()
     st.link_button("▶️ Não tocou aqui? Abrir no YouTube", v["url"], width="stretch")
     notes = v.get("notes")
     notes_json = json.dumps(notes, ensure_ascii=False) if isinstance(notes, (dict, list)) else (notes or "")
@@ -972,7 +1119,8 @@ def videos_tab(lvl: str) -> None:
         with st.spinner("Preparando perguntas..."):
             try:
                 prev = ss.get(qkey) or []
-                qs, u = learn.video_questions(notes_json, LEVELS[lvl]["cefr"], prof.keys.get("anthropic"), prev)
+                qs, u = learn.video_questions(notes_json, LEVELS[lvl]["cefr"], prof.keys.get("anthropic"), prev,
+                                              kids=bool(LEVELS[lvl].get("kids")))
                 log(step="vídeo perguntas", provider="Anthropic", model=u["model"], ok=True,
                     input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
                 ss[qkey] = qs
@@ -986,7 +1134,8 @@ def videos_tab(lvl: str) -> None:
     if sent:
         with st.spinner("Corrigindo..."):
             try:
-                res, u = learn.grade_answers(notes_json, qs, ans, LEVELS[lvl]["cefr"], prof.keys.get("anthropic"))
+                res, u = learn.grade_answers(notes_json, qs, ans, LEVELS[lvl]["cefr"], prof.keys.get("anthropic"),
+                                             kids=bool(LEVELS[lvl].get("kids")))
                 log(step="vídeo correção", provider="Anthropic", model=u["model"], ok=True,
                     input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
             except Exception as e:
@@ -1063,9 +1212,14 @@ def learn_view() -> None:
         # dentro do planeta: só a missão, sem título, abas nem seletor (imersão total)
         kids_planet(ss.kid_lvl, ss.kid_inside, db.exercises_done_map(email, ss.kid_lvl) if db.enabled() else {})
         return
-    ui.hero("📚 Aprender", "Trilhas separadas da conversa: gramática por nível, vídeos para treinar a escuta e um tradutor.")
-    lvl = learn_level()
-    t1, t2, t3 = st.tabs(["📝 Gramática", "🎬 Vídeos", "🔤 Tradutor"])
+    kids = bool(LEVELS.get(ss.level, {}).get("kids"))
+    if kids:
+        ui.hero("🚀 Missões", "Escolha um planeta e mergulhe nele!")
+    else:
+        ui.hero("📚 Aprender", "Trilhas separadas da conversa: gramática por nível, vídeos para treinar a escuta e um tradutor.")
+    lvl = learn_level() if not KIDS_PROFILE else ss.level
+    t1, t2, t3 = st.tabs(["🪐 Planetas", "📺 Desenhos", "🔤 Como se diz?"] if kids else
+                         ["📝 Gramática", "🎬 Vídeos", "🔤 Tradutor"])
     with t1:
         grammar_tab(lvl)
     with t2:
@@ -1088,13 +1242,19 @@ SCENE_IMG = {"dia_a_dia": "app/static/theme/lon_daily.webp", "trabalho": "app/st
              "livre": "app/static/theme/lon_free.webp"}
 if not ss.started:
     ui.brand()
-    ui.hero("Pronto para conversar?", "Escolha o nível, o modo e o assunto. Ela responde e te ajuda a soar mais natural.")
+    kids_home = bool(LEVELS[ss.level].get("kids"))
+    if kids_home:
+        galaxy.mascot("Hi! I'm Bip! 🤖", "Vamos conversar em inglês? Escolha um assunto e toque no botão!",
+                      hat=rewards.equipped_emoji(rewards.load_shop(email), "hat"), sound=False, key="bip_home")
+    else:
+        ui.hero("Pronto para conversar?", "Escolha o nível, o modo e o assunto. Ela responde e te ajuda a soar mais natural.")
     if ss.live_msg:
         st.info(ss.live_msg, icon="⚡")
         ss.live_msg = ""
 
     if prof.level_locked:
-        st.markdown(f"**Nível:** {LEVELS[ss.level]['label']}")
+        if not kids_home:
+            st.markdown(f"**Nível:** {LEVELS[ss.level]['label']}")
     else:
         ss.level_pick = ss.level    # sempre igual ao nível do app
         st.pills("Nível", list(LEVELS), format_func=lambda k: LEVELS[k]["label"], selection_mode="single",
@@ -1108,9 +1268,15 @@ if not ss.started:
         modes = {"texto": "⌨️ Só texto"}
     if ss.mode not in modes:
         ss.mode = list(modes)[0]
-    ss.mode = st.pills("Modo", list(modes), format_func=lambda k: modes[k], default=ss.mode,
-                       selection_mode="single", key="mode_pick") or ss.mode
-    if live_ok:
+    if kids_home:
+        # criança: sem escolher "modo" — é sempre apertar para falar (a vez dele fica bem clara)
+        ss.mode = "apertar" if "apertar" in modes else list(modes)[0]
+    else:
+        ss.mode = st.pills("Modo", list(modes), format_func=lambda k: modes[k], default=ss.mode,
+                           selection_mode="single", key="mode_pick") or ss.mode
+    if kids_home:
+        pass
+    elif live_ok:
         st.caption(f"⚡ Ao vivo: {max(0, prof.live_daily_minutes - live_used / 60):.0f} de "
                    f"{prof.live_daily_minutes} min hoje")
     elif prof.live_enabled:
@@ -1127,6 +1293,8 @@ if not ss.started:
             ss.scen_card = picked
             st.rerun()
         scen_key = cur
+    elif kids:
+        scen_key = "criancas"
     else:
         scen_key = st.pills("Cenário", scen_keys, format_func=lambda k: SCENARIOS[k]["label"],
                             default=scen_keys[0], selection_mode="single", key=f"scen_{int(bool(kids))}") or scen_keys[0]
@@ -1136,7 +1304,8 @@ if not ss.started:
         phases = list(scen["phases"])
         done_k = db.exercises_done_map(email, ss.level) if db.enabled() else {}
         cur_ph = phases[min(((kids_next(done_k) - 1) // 10), len(phases) - 1)]
-        phase = st.pills("Fase", phases, default=cur_ph, selection_mode="single", key="kid_phase") or cur_ph
+        phase = (st.pills("Fase", phases, default=cur_ph, selection_mode="single", key="kid_phase") or cur_ph) \
+            if prof.is_admin else cur_ph
         sits = scen["phases"][phase]
         situation = st.pills("Assunto", list(sits), selection_mode="single", default=list(sits)[0],
                              key=f"sit_kid_{phases.index(phase)}") or list(sits)[0]
@@ -1162,7 +1331,8 @@ if not ss.started:
     blocked = left is not None and left <= 0
     if blocked:
         st.warning("Você chegou ao limite de falas de hoje. Volte amanhã! 🙂")
-    if st.button("▶️ Começar conversa", type="primary", width="stretch", disabled=blocked):
+    if st.button("🤖 Conversar com o Bip" if kids_home else "▶️ Começar conversa", type="primary", width="stretch",
+                 disabled=blocked):
         try:
             start_session(role, context_label)
             st.rerun()
@@ -1277,6 +1447,13 @@ if ss.last_error:
     st.warning(ss.last_error, icon="⚠️")
 
 utter = rec = None
+kid_talk = bool(LEVELS[ss.level].get("kids"))
+if kid_talk and ss.turns and ss.turns[-1]["role"] == "assistant":
+    sug = ss.turns[-1].get("suggestions") or []
+    st.markdown('<div class="kp-card" style="text-align:center;border-color:#7EF0B5">'
+                '<div style="font-size:1.4rem;font-weight:900;color:#7EF0B5">🎤 Sua vez! Aperte o microfone e fale</div>'
+                + (f'<div style="margin-top:6px;color:#EAF2FF">Você pode dizer: <b>{html_escape(sug[0])}</b></div>' if sug else "")
+                + '</div>', unsafe_allow_html=True)
 with st.bottom:
     m1, m2 = st.columns([4, 1.3], vertical_alignment="center")
     with m1:
@@ -1285,6 +1462,9 @@ with st.bottom:
             utter = voice_chat(ss.reply_seq, audio_b64, ss.audio[1] if ss.audio else None, ss.listen_token)
         elif ss.mode == "apertar" and voice.can_listen():
             rec = st.audio_input("🎙️ Grave sua resposta", key=f"mic_{ss.mic_key}", label_visibility="collapsed")
+    if kid_talk:
+        st.markdown("<style>[data-testid='stAudioInput']{border:2px solid #7EF0B5 !important;border-radius:16px;"
+                    "box-shadow:0 0 18px rgba(126,240,181,.55)}</style>", unsafe_allow_html=True)
     end_clicked = m2.button("🏁 Encerrar", key="end_bottom", width="stretch",
                             help="Encerra a conversa, desliga o microfone e mostra o resumo.")
     typed = st.chat_input("Ou digite sua resposta em inglês...")

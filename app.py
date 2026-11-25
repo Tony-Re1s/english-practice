@@ -1048,9 +1048,9 @@ def race_board_html(rows: list[dict], key: str, unit: str) -> str:
 
 
 def challenge_pool(lvl: str) -> list[dict]:
-    """Perguntas de escolher (com emoji) das missões que já existem até o planeta onde ele está."""
+    """Perguntas de escolher das missões/exercícios que já existem até onde a pessoa chegou."""
     done = db.exercises_done_map(email, lvl) if db.enabled() else {}
-    upto = max(3, kids_next(done) - 1)
+    upto = max(3, kids_next(done) - 1) if LEVELS.get(lvl, {}).get("kids") else max(3, max(done or {0: 0}) + 1)
     pool = []
     for n in range(1, upto + 1):
         row = db.get_exercise(lvl, n) if db.enabled() else None
@@ -1071,7 +1071,17 @@ def race_view(lvl: str) -> None:
     if ch and not ch.get("over"):
         challenge_play(ch)
         return
-    if ch and ch.get("over"):
+    kid = bool(LEVELS.get(lvl, {}).get("kids"))
+    if not kid:
+        st.markdown("<style>.kp-card{background:rgba(20,28,52,.75);border:2px solid #C9A85C;border-radius:16px;"
+                    "padding:12px 14px;margin:8px 0}.kp-ins{color:#E6CD8E;font-weight:700}.kp-q{font-size:1.25rem;"
+                    "font-weight:700;margin-top:4px}</style>", unsafe_allow_html=True)
+    if ch and ch.get("over") and not kid:
+        r = ch["result"]
+        (st.success if r["new_record"] else st.info)(
+            f"🏆 Novo recorde: {r['score']} pontos!" if r["new_record"] else
+            f"{r['score']} pontos. Seu recorde é {r['best']}.", icon="⚡")
+    elif ch and ch.get("over"):
         r = ch["result"]
         if r["new_record"]:
             galaxy.mascot("NEW RECORD! 🏆", f"NOVO RECORDE! {r['score']} pontos!", party=True, big=True, confetti=True,
@@ -1080,12 +1090,14 @@ def race_view(lvl: str) -> None:
             galaxy.mascot(f"{r['score']} points! 🚀", f"Você fez {r['score']} pontos! Seu recorde é {r['best']}. "
                           "Tente de novo para bater!", party=True, confetti=r["score"] > 0, key=f"ch_end_{ch['id']}")
     st.markdown('<div style="font-size:1.6rem;font-weight:900;margin:4px 0">⚡ Desafio Relâmpago</div>'
-                '<div style="color:#AFC0E8;margin-bottom:8px">60 segundos para acertar o máximo de palavras '
-                'das suas missões. Acerto rápido vale mais!</div>', unsafe_allow_html=True)
+                '<div style="opacity:.8;margin-bottom:8px">60 segundos para acertar o máximo de questões '
+                + ('das suas missões' if kid else 'dos seus exercícios de gramática')
+                + '. Acerto rápido vale mais!</div>', unsafe_allow_html=True)
     pool = challenge_pool(lvl)
     best = compete.load_best(email) if db.enabled() else {"best": 0}
     if len(pool) < 4:
-        st.info("Complete pelo menos 1 planeta para liberar o desafio! 🪐", icon="🔒")
+        st.info("Complete pelo menos 1 planeta para liberar o desafio! 🪐" if kid else
+                "Faça pelo menos um exercício de gramática para liberar o desafio.", icon="🔒")
     elif st.button(f"⚡ Começar desafio (seu recorde: {best['best']})", type="primary", width="stretch", key="ch_go"):
         random.shuffle(pool)
         ss.challenge = {"id": int(_t.time()), "qs": pool[:20], "i": 0, "ok": 0, "bad": 0, "start": _t.time(),
@@ -1172,9 +1184,10 @@ def challenge_play(ch: dict) -> None:
     st.markdown(f'<div class="kp-card"><div class="kp-ins">{html_escape(ins)}</div>'
                 + (f'<div class="kp-q">{html_escape(prompt)}</div>' if prompt else "") + '</div>', unsafe_allow_html=True)
     tag = f"{ch['id']}:{ch['i']}"
-    ui.say_now(say, tag, key="say_now_ch")   # voz do aparelho: instantânea, não gasta o tempo do desafio
-    if st.button("🔊 Ouvir de novo", key=f"ch_re_{tag}"):
-        ui.say_now(say, tag + f":{_t.time()}", key="say_now_ch2")
+    if q.get("say"):   # voz do aparelho: instantânea, não gasta o tempo do desafio
+        ui.say_now(say, tag, key="say_now_ch")
+        if st.button("🔊 Ouvir de novo", key=f"ch_re_{tag}"):
+            ui.say_now(say, tag + f":{_t.time()}", key="say_now_ch2")
     emo = q.get("emojis") or []
     cols = st.columns(2)
     for j, opt in enumerate(q["options"]):
@@ -1739,6 +1752,25 @@ def videos_tab(lvl: str) -> None:
             st.error(f"Erro ao iniciar: {e}")
 
 
+SIT_EMOJI = {
+    "Restaurante": "🍽️", "Supermercado": "🛒", "Pedir informação na rua": "🗺️", "Farmácia": "💊",
+    "Small talk com vizinho": "🏡", "Reunião de status": "📋", "Explicar um dashboard": "📊",
+    "Entrevista de emprego": "🤝", "Colega estrangeiro": "🌍", "Explicar um processo": "⚙️",
+    "Imigração no aeroporto": "🛂", "Primeiro dia na escola": "🏫", "Check-in no Airbnb": "🔑",
+    "Fazer amigos na escola": "🧑‍🤝‍🧑", "Chip de celular": "📱", "Mercado financeiro": "📈",
+    "Câmbio e moedas": "💱", "Tesouraria e dados": "🏦", "Tecnologia e IA": "🤖", "Viagens e culturas": "🧳",
+    "Notícias e atualidades": "📰", "Filmes e séries": "🎬", "Esportes e saúde": "🏃",
+}
+SIT_SLUG = {k: "sit_" + "".join(ch for ch in __import__("unicodedata").normalize("NFKD", k.lower())
+                                if ch.isalnum() or ch == " ").strip().replace(" ", "_") + ".webp" for k in SIT_EMOJI}
+
+
+def theme_img(name: str) -> str:
+    """Caminho da ilustração se ela já existe em static/theme; senão vazio (o cartão usa o emoji)."""
+    from pathlib import Path as _P
+    return "app/static/theme/" + name if (_P(__file__).resolve().parent / "static" / "theme" / name).exists() else ""
+
+
 def _now_tag() -> str:
     import time as _t
     return str(_t.time())
@@ -1860,8 +1892,22 @@ def learn_view() -> None:
         else:
             translator_tab()
         return
-    ui.hero("📚 Aprender", "Trilhas separadas da conversa: gramática por nível, vídeos para treinar a escuta e um tradutor.")
     lvl = learn_level()
+    th = current_theme()
+    if th == "london":
+        # mesmo padrão do infantil, no estilo Londres: cartões ilustrados e o conteúdo logo abaixo
+        items = [{"key": "gram", "label": "Gramática", "img": theme_img("tile_lon_grammar.webp"), "emoji": "📝"},
+                 {"key": "vid", "label": "Vídeos", "img": theme_img("tile_lon_videos.webp"), "emoji": "🎬"},
+                 {"key": "tr", "label": "Tradutor", "img": theme_img("tile_lon_translate.webp"), "emoji": "🔤"},
+                 {"key": "race", "label": "Corrida", "img": theme_img("tile_lon_race.webp"), "emoji": "🏁"}]
+        cur = ss.get("adult_tab", "gram")
+        pk = ui.kid_tiles(items, cur, key="adult_tabs", theme="london")
+        if pk and pk != cur:
+            ss.adult_tab = pk
+            st.rerun()
+        {"gram": grammar_tab, "vid": videos_tab, "race": race_view}.get(cur, lambda _l: translator_tab())(lvl)
+        return
+    ui.hero("📚 Aprender", "Trilhas separadas da conversa: gramática por nível, vídeos para treinar a escuta e um tradutor.")
     t1, t2, t3 = st.tabs(["📝 Gramática", "🎬 Vídeos", "🔤 Tradutor"])
     with t1:
         grammar_tab(lvl)
@@ -1916,6 +1962,14 @@ if not ss.started:
         ss.level_pick_k = ss.level  # infantil: seletor pequeno, discreto (só para quem pode trocar)
         st.selectbox("Nível", list(LEVELS), format_func=lambda k: LEVELS[k]["label"], key="level_pick_k",
                      on_change=_set_level, args=("level_pick_k",))
+    elif current_theme() == "london":
+        st.markdown("**Nível**")
+        lv_items = [{"key": k, "emoji": LEVELS[k]["label"].split(" ", 1)[0],
+                     "label": LEVELS[k]["label"].split(" ", 1)[-1].replace(" (", "\n(")} for k in LEVELS]
+        lp = ui.kid_tiles(lv_items, ss.level, key="lvl_tiles", theme="london", small=True, cols=3)
+        if lp and lp != ss.level:
+            ss.level = lp
+            st.rerun()
     else:
         ss.level_pick = ss.level    # sempre igual ao nível do app
         st.pills("Nível", list(LEVELS), format_func=lambda k: LEVELS[k]["label"], selection_mode="single",
@@ -1932,6 +1986,13 @@ if not ss.started:
     if kids_home:
         # criança: sem escolher "modo" — é sempre apertar para falar (a vez dele fica bem clara)
         ss.mode = "apertar" if "apertar" in modes else list(modes)[0]
+    elif current_theme() == "london":
+        st.markdown("**Modo**")
+        mp = ui.kid_tiles([{"key": k, "emoji": v.split(" ", 1)[0], "label": v.split(" ", 1)[-1]} for k, v in modes.items()],
+                          ss.mode, key="mode_tiles", theme="london", small=True)
+        if mp and mp != ss.mode:
+            ss.mode = mp
+            st.rerun()
     else:
         ss.mode = st.pills("Modo", list(modes), format_func=lambda k: modes[k], default=ss.mode,
                            selection_mode="single", key="mode_pick") or ss.mode
@@ -1986,6 +2047,21 @@ if not ss.started:
             ss[skey] = sp
             st.rerun()
         role = sits[situation]
+        context_label = f"{scen['label']} · {situation}"
+    elif scen["situations"] and current_theme() == "london":
+        names = list(scen["situations"])
+        skey = f"sit_lon_{scen_key}"
+        situation = ss.get(skey) if ss.get(skey) in names else names[0]
+        st.markdown("**" + ("Assunto" if scen_key == "assuntos" else "Situação") + "**")
+        sp = ui.kid_tiles([{"key": n, "label": n, "emoji": SIT_EMOJI.get(n, "💬"), "img": theme_img(SIT_SLUG.get(n, ""))}
+                           for n in names], situation, key=f"sit_tiles_{scen_key}", theme="london",
+                          cols=4 if len(names) > 6 else 3)
+        if sp and sp != situation:
+            ss[skey] = sp
+            st.rerun()
+        role = scen["situations"][situation]
+        if scen_key == "assuntos":
+            role = TOPIC_ROLE.format(topic=role)
         context_label = f"{scen['label']} · {situation}"
     elif scen["situations"]:
         situation = st.pills("Assunto" if scen_key == "assuntos" else "Situação", list(scen["situations"]),

@@ -514,7 +514,8 @@ _TILES_CSS = """
   text-shadow:0 2px 6px rgba(0,0,0,.6); margin-top:4px; }
 .kt.many .kt-c { padding:6px 2px 8px; }
 .kt.many .kt-c span { font-size:clamp(10.5px, 2.85vw, 17px); letter-spacing:-.01em; }
-.kt-c span { overflow-wrap:normal; word-break:keep-all; hyphens:none; }
+.kt-c span { overflow-wrap:normal; word-break:keep-all; hyphens:none; white-space:pre-line; }
+.kt.sm .kt-emo { flex:0 0 auto; font-size:clamp(22px, 6vw, 30px); }
 .kt-emo { flex:1; min-height:0; display:flex; align-items:center; justify-content:center;
   font-size:clamp(34px, 11vw, 58px); filter:drop-shadow(0 6px 10px rgba(0,0,0,.5)); transition: transform .3s cubic-bezier(.2,.8,.2,1); }
 .kt-c.on .kt-emo { transform:scale(1.1) rotate(-6deg); }
@@ -525,6 +526,15 @@ _TILES_CSS = """
 .kt-c:active { transform:translateY(4px) scale(.97); box-shadow:0 1px 0 #0A0F2E; }
 @media (hover:hover) { .kt-c:hover img { transform:scale(1.12) rotate(4deg); } }
 @media (min-width: 641px) { .kt-c { height:118px; } }
+/* versão Londres: azul-marinho, dourado e serifa */
+.kt.lon .kt-c { border:2px solid #C9A85C; background:radial-gradient(120% 90% at 50% 15%, #33436B 0%, #18213A 75%);
+  box-shadow:0 5px 0 #0B101E, 0 10px 20px rgba(0,0,0,.35); }
+.kt.lon .kt-c span { color:#F4ECDC; font-family:'Cormorant Garamond', Georgia, serif; font-weight:700;
+  font-size:clamp(14px, 3.9vw, 20px); letter-spacing:.01em; }
+.kt.lon.many .kt-c span { font-size:clamp(12px, 3.2vw, 18px); }
+.kt.lon .kt-c.on { background:linear-gradient(180deg, #E6CD8E, #C9A85C); border-color:#F6E7BE;
+  box-shadow:0 5px 0 #6E5824, 0 0 22px rgba(230,205,142,.45); }
+.kt.lon .kt-c.on span { color:#1B1408; }
 .kt.sm .kt-c { flex-direction:row; justify-content:center; gap:6px; height:clamp(56px, 15vw, 72px); padding:6px 8px; }
 .kt.sm .kt-c img { flex:0 0 auto; height:78%; max-width:32%; }
 .kt.sm .kt-c span { margin:0; font-size:clamp(10.5px, 2.9vw, 16px); text-align:left; overflow-wrap:normal; min-width:0; }
@@ -534,7 +544,7 @@ _TILES_JS = """
 export default function (component) {
   const { data, setTriggerValue, parentElement } = component;
   const old = parentElement.querySelector('.kt'); if (old) old.remove();
-  const box = document.createElement('div'); box.className = 'kt' + (data.small ? ' sm' : '') + ((data.cols || (data.items || []).length) >= 5 ? ' many' : '');
+  const box = document.createElement('div'); box.className = 'kt' + (data.theme === 'london' ? ' lon' : '') + (data.small ? ' sm' : '') + ((data.cols || (data.items || []).length) >= 5 ? ' many' : '');
   box.style.setProperty('--n', data.cols || (data.items || []).length);
   (data.items || []).forEach((it) => {
     const c = document.createElement('div');
@@ -556,9 +566,10 @@ export default function (component) {
 _tiles = st.components.v2.component("english_kid_tiles", css=_TILES_CSS, js=_TILES_JS)
 
 
-def kid_tiles(items: list[dict], selected: str, key: str, small: bool = False, cols: int | None = None):
+def kid_tiles(items: list[dict], selected: str, key: str, small: bool = False, cols: int | None = None,
+              theme: str = "space"):
     """items: [{'key','label','img' ou 'emoji', 'lock'?}]. Cartões ilustrados; cols = quantos por linha. Retorna a chave tocada."""
-    res = _tiles(key=key, data={"items": items, "selected": selected, "small": small, "cols": cols},
+    res = _tiles(key=key, data={"items": items, "selected": selected, "small": small, "cols": cols, "theme": theme},
                  on_pick_change=lambda: None)
     return getattr(res, "pick", None)
 

@@ -76,10 +76,14 @@ def _fmt(text: str) -> str:
 
 
 def hero(title: str, subtitle: str) -> None:
+    from services.i18n import T
+    title, subtitle = T(title), T(subtitle)
     st.markdown(f'<div class="hero"><h1>{_fmt(title)}</h1><p>{_fmt(subtitle)}</p></div>', unsafe_allow_html=True)
 
 
 def pill(text: str) -> None:
+    from services.i18n import T
+    text = " · ".join(T(part) for part in text.split(" · "))   # ex.: "🛒 Dia a dia · Restaurante"
     st.markdown(f'<span class="pill">{_fmt(text)}</span>', unsafe_allow_html=True)
 
 
@@ -339,75 +343,136 @@ export default function (component) {
   const A = window.AudioContext || window.webkitAudioContext;
   const ctx = () => { if (!window.__epCtx) window.__epCtx = new A(); if (window.__epCtx.state === 'suspended') window.__epCtx.resume(); return window.__epCtx; };
 
-  // ---- trilha de fundo: acordes suaves + estrelinhas (tudo sintetizado, em loop) ----
+  // ---- trilha de fundo (tudo sintetizado, em loop): 'space' = acordes + estrelinhas; 'london' = caixinha de música
+  //      em tom menor, cordas e um sino distante. Abaixa sozinha quando o app fala ou um vídeo toca. ----
+  window.__epStyle = cfg.style || 'space';
+  window.__epTalking = !!cfg.talking;
   const music = window.__epMusic || (window.__epMusic = { on: false });
-  const CHORDS = [[261.6, 329.6, 392, 493.9], [220, 261.6, 329.6, 392], [174.6, 220, 261.6, 329.6], [196, 246.9, 293.7, 392]];
-  const PENTA = [523.3, 587.3, 659.3, 784, 880, 1046.5];
+  const SPACE = { chords: [[261.6, 329.6, 392, 493.9], [220, 261.6, 329.6, 392], [174.6, 220, 261.6, 329.6], [196, 246.9, 293.7, 392]],
+                  sparkle: [523.3, 587.3, 659.3, 784, 880, 1046.5], len: 8 };
+  const LONDON = { chords: [[146.8, 220, 293.7, 349.2], [116.5, 174.6, 233.1, 293.7], [130.8, 196, 261.6, 329.6], [110, 164.8, 220, 277.2]],
+                   sparkle: [587.3, 698.5, 880, 1046.5, 1174.7, 1396.9], len: 9 };
+  const level = () => {     // volume desejado agora (0 = calado)
+    if (!window.__epMusicWanted) return 0;
+    if (window.__epTalking) return 0;                 // conversa por voz: sem música (não atrapalha o microfone)
+    const base = 0.16 * window.__epMusicVol;
+    return window.__epDucked ? base * 0.12 : base;    // alguém falando / vídeo tocando: bem baixinho
+  };
+  const bell = (c, t) => {   // sino distante (parciais inarmônicos)
+    [[392, .05], [784 * 1.003, .025], [1046.5 * 1.01, .015], [1567.98, .01]].forEach(([f, v]) => {
+      const o = c.createOscillator(), g = c.createGain(); o.type = 'sine'; o.frequency.value = f;
+      g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(v, t + .01); g.gain.exponentialRampToValueAtTime(.0001, t + 5);
+      o.connect(g); g.connect(music.master); o.start(t); o.stop(t + 5.1);
+    });
+  };
   const startMusic = () => {
     if (music.on) return;
     const c = ctx(); music.on = true;
     music.master = c.createGain(); music.master.gain.value = 0.0001;
-    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1400;
-    music.master.connect(lp); lp.connect(c.destination);
-    music.master.gain.exponentialRampToValueAtTime(0.05 * window.__epMusicVol + 0.0001, c.currentTime + 3);
+    music.lp = c.createBiquadFilter(); music.lp.type = 'lowpass'; music.lp.frequency.value = 1600;
+    music.master.connect(music.lp); music.lp.connect(c.destination);
     let k = 0;
-    const chord = () => {
+    const loop = () => {
       if (!music.on) return;
-      const t = c.currentTime;
-      CHORDS[k++ % CHORDS.length].forEach((f, i) => {
+      const t = c.currentTime, L = window.__epStyle === 'london', S = L ? LONDON : SPACE;
+      music.lp.frequency.setValueAtTime(L ? 1100 : 1600, t);
+      const ch = S.chords[k % S.chords.length];
+      ch.forEach((f, i) => {   // cama de acordes
         [f, f / 2].forEach((ff, j) => {
-          const o = c.createOscillator(), g = c.createGain(); o.type = j ? 'sine' : 'triangle'; o.frequency.value = ff;
-          o.detune.value = (i - 1.5) * 4;
-          g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(j ? 0.10 : 0.06, t + 2.2);
-          g.gain.exponentialRampToValueAtTime(0.0001, t + 8.6);
-          o.connect(g); g.connect(music.master); o.start(t); o.stop(t + 8.8);
+          const o = c.createOscillator(), g = c.createGain();
+          o.type = L ? (j ? 'sine' : 'sawtooth') : (j ? 'sine' : 'triangle'); o.frequency.value = ff; o.detune.value = (i - 1.5) * 5;
+          g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(L ? (j ? 0.08 : 0.025) : (j ? 0.10 : 0.06), t + 2.4);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + S.len + .6);
+          o.connect(g); g.connect(music.master); o.start(t); o.stop(t + S.len + .8);
         });
       });
-      for (let n = 0; n < 4; n++) {   // estrelinhas
-        const tt = t + 1 + Math.random() * 6, o = c.createOscillator(), g = c.createGain();
-        o.type = 'sine'; o.frequency.value = PENTA[Math.floor(Math.random() * PENTA.length)];
-        g.gain.setValueAtTime(0.0001, tt); g.gain.exponentialRampToValueAtTime(0.05, tt + .02);
-        g.gain.exponentialRampToValueAtTime(0.0001, tt + 1.6);
-        o.connect(g); g.connect(music.master); o.start(tt); o.stop(tt + 1.7);
+      if (L) {   // caixinha de música: arpejo do acorde, uma oitava acima
+        const notes = ch.concat(ch.slice(1, 3).reverse()).map(f => f * 4);
+        notes.forEach((f, n) => {
+          const tt = t + .6 + n * 1.15, o = c.createOscillator(), o2 = c.createOscillator(), g = c.createGain();
+          o.type = 'sine'; o.frequency.value = f; o2.type = 'triangle'; o2.frequency.value = f * 2;
+          g.gain.setValueAtTime(.0001, tt); g.gain.exponentialRampToValueAtTime(.07, tt + .008); g.gain.exponentialRampToValueAtTime(.0001, tt + 2.2);
+          o.connect(g); o2.connect(g); g.connect(music.master); o.start(tt); o2.start(tt); o.stop(tt + 2.3); o2.stop(tt + 2.3);
+        });
+        if (k % 4 === 3) bell(c, t + 4);
+      } else {
+        for (let n = 0; n < 4; n++) {   // estrelinhas
+          const tt = t + 1 + Math.random() * 6, o = c.createOscillator(), g = c.createGain();
+          o.type = 'sine'; o.frequency.value = S.sparkle[Math.floor(Math.random() * S.sparkle.length)];
+          g.gain.setValueAtTime(0.0001, tt); g.gain.exponentialRampToValueAtTime(0.06, tt + .02);
+          g.gain.exponentialRampToValueAtTime(0.0001, tt + 1.6);
+          o.connect(g); g.connect(music.master); o.start(tt); o.stop(tt + 1.7);
+        }
       }
-      music.timer = setTimeout(chord, 8000);
+      k++;
+      music.timer = setTimeout(loop, S.len * 1000);
     };
-    chord();
+    loop();
   };
-  const stopMusic = () => {
+  const setLevel = () => {
     if (!music.on) return;
-    music.on = false; clearTimeout(music.timer);
-    try { const c = ctx(); music.master.gain.cancelScheduledValues(c.currentTime);
-      music.master.gain.setValueAtTime(music.master.gain.value, c.currentTime);
-      music.master.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + 1.2); } catch (e) {}
+    try { const c = ctx(); music.master.gain.setTargetAtTime(Math.max(0.0001, level()), c.currentTime, .35); } catch (e) {}
   };
   window.__epApplyMusic = () => {
-    if (window.__epMusicWanted && window.__epGesture) {
-      startMusic();
-      try { music.master.gain.setTargetAtTime(0.05 * window.__epMusicVol + 0.0001, ctx().currentTime, .5); } catch (e) {}
-    } else stopMusic();
+    if (window.__epMusicWanted && window.__epGesture) { startMusic(); setLevel(); }
+    else if (music.on) setLevel();
   };
+  // abaixa a música quando o app fala (áudios, voz do aparelho) ou um vídeo toca
+  if (!window.__epDuckTimer) {
+    window.__epDuckTimer = setInterval(() => {
+      let busy = !!window.__epYTPlaying;
+      try { if (window.speechSynthesis && speechSynthesis.speaking) busy = true; } catch (e) {}
+      if (!busy) document.querySelectorAll('audio, video').forEach(m => { if (!m.paused && !m.ended && m.currentTime > 0) busy = true; });
+      if (busy !== !!window.__epDucked) { window.__epDucked = busy; setLevel(); }
+    }, 300);
+  }
   window.__epApplyMusic();
 
-  // ---- botão flutuante 🔊 / 🔇 ----
+  // ---- botão flutuante 🔊: toque abre o painel com volume e mudo ----
   let fab = document.getElementById('ep-sound-fab');
   if (cfg.on) {
     if (!fab) {
-      fab = document.createElement('button'); fab.id = 'ep-sound-fab';
-      fab.style.cssText = 'position:fixed;right:12px;top:12px;z-index:9999;width:46px;height:46px;border-radius:50%;'
-        + 'border:2px solid #5FE3FF;background:#1C2A66;color:#fff;font-size:22px;box-shadow:0 4px 0 rgba(0,0,0,.45);cursor:pointer';
-      fab.addEventListener('click', (ev) => { ev.stopPropagation(); window.__epSetMute(!window.__epMuted); });
+      fab = document.createElement('div'); fab.id = 'ep-sound-fab';
+      fab.style.cssText = 'position:fixed;right:12px;top:12px;z-index:9999;font-family:system-ui,sans-serif';
+      fab.innerHTML = '<button class="b" style="width:46px;height:46px;border-radius:50%;border:2px solid #5FE3FF;'
+        + 'background:#1C2A66;color:#fff;font-size:22px;box-shadow:0 4px 0 rgba(0,0,0,.45);cursor:pointer"></button>'
+        + '<div class="p" style="display:none;position:absolute;right:0;top:54px;width:210px;padding:12px;border-radius:16px;'
+        + 'background:#0E1430;border:2px solid #5FE3FF;color:#F2F5FF;box-shadow:0 10px 24px rgba(0,0,0,.5)">'
+        + '<div style="font-weight:800;margin-bottom:6px">🎵 <span class="lb">Música</span></div>'
+        + '<input class="v" type="range" min="0" max="100" step="5" style="width:100%">'
+        + '<button class="m" style="margin-top:8px;width:100%;padding:8px;border-radius:12px;border:none;font-weight:800;cursor:pointer"></button></div>';
       document.body.appendChild(fab);
+      const panel = fab.querySelector('.p');
+      fab.querySelector('.b').addEventListener('click', (ev) => { ev.stopPropagation(); panel.style.display = panel.style.display === 'none' ? 'block' : 'none'; });
+      document.addEventListener('pointerdown', (ev) => { if (!fab.contains(ev.target)) panel.style.display = 'none'; });
+      fab.querySelector('.m').addEventListener('click', (ev) => { ev.stopPropagation(); window.__epSetMute(!window.__epMuted); });
+      const v = fab.querySelector('.v');
+      v.addEventListener('input', () => { window.__epMusicVol = v.value / 100; setLevel(); });
+      v.addEventListener('change', () => { window.__epSendVol && window.__epSendVol(Number(v.value)); });
     }
     fab.style.display = '';
+    const L = (cfg.style === 'london');
+    fab.querySelector('.b').style.borderColor = L ? '#C9A85C' : '#5FE3FF';
+    fab.querySelector('.b').style.background = L ? '#1E2945' : '#1C2A66';
+    fab.querySelector('.p').style.borderColor = L ? '#C9A85C' : '#5FE3FF';
+    fab.querySelector('.lb').textContent = cfg.en ? 'Music' : 'Música';
+    fab.querySelector('.v').value = Math.round(window.__epMusicVol * 100);
   } else if (fab) fab.style.display = 'none';
   window.__epMuted = !!cfg.muted;
-  if (fab) fab.textContent = window.__epMuted ? '🔇' : '🔊';
+  const paint = () => {
+    if (!fab) return;
+    fab.querySelector('.b').textContent = window.__epMuted ? '🔇' : '🔊';
+    const m = fab.querySelector('.m');
+    m.textContent = window.__epMuted ? (cfg.en ? '🔊 Sound on' : '🔊 Ligar sons') : (cfg.en ? '🔇 Mute all' : '🔇 Silenciar tudo');
+    m.style.background = window.__epMuted ? '#FFE066' : '#2B3C8F'; m.style.color = window.__epMuted ? '#2A1600' : '#fff';
+  };
+  paint();
+  window.__epSendVol = (n) => setTriggerValue('vol', n);
   window.__epSetMute = (m) => {
     window.__epMuted = m;
     window.__epSfxOn = !m && cfg.taps !== false; window.__epFx = !m && cfg.fx !== false;
     window.__epMusicWanted = !m && cfg.music !== false;
-    if (fab) fab.textContent = m ? '🔇' : '🔊';
+    paint();
     window.__epApplyMusic();
     setTriggerValue('mute', m ? 'on' : 'off');
   };
@@ -434,9 +499,10 @@ export default function (component) {
   };
   document.addEventListener('pointerdown', (ev) => {
     if (!window.__epGesture) { window.__epGesture = true; window.__epApplyMusic && window.__epApplyMusic(); }
+    if (ev.target.closest && ev.target.closest('#ep-sound-fab')) return;
     if (!window.__epSfxOn) return;
     const el = ev.target.closest('button, [role="tab"], a[data-testid], [data-testid="stLinkButton"] a');
-    if (!el || el.disabled || el.id === 'ep-sound-fab') return;
+    if (!el || el.disabled) return;
     const txt = (el.innerText || '').trim();
     let k = 'tap';
     if (el.getAttribute('role') === 'tab') k = 'tab';
@@ -458,8 +524,11 @@ def apply_theme(name: str, sound: dict | None = None):
         return
     st.markdown(theme_css(name), unsafe_allow_html=True)
     _parallax(key="parallax")
-    res = _clicks(key="click_sounds", data={"on": name == "space", **(sound or {})}, on_mute_change=lambda: None)
-    return getattr(res, "mute", None)
+    snd = dict(sound or {})
+    on = name in ("space", "london") and snd.pop("enabled", True)
+    res = _clicks(key="click_sounds", data={"on": on, "style": name, **snd},
+                  on_mute_change=lambda: None, on_vol_change=lambda: None)
+    return {"mute": getattr(res, "mute", None), "vol": getattr(res, "vol", None)}
 
 
 # --- Cartões com foto (cenários do tema Londres) ---------------------------------------------
@@ -497,6 +566,8 @@ _cards = st.components.v2.component("english_scene_cards", css=_CARDS_CSS, js=_C
 
 def scene_cards(items: list[dict], selected: str, key: str):
     """items: [{'key','label','img'}]. Retorna a chave tocada (ou None)."""
+    from services.i18n import T
+    items = [{**it, "label": T(it.get("label", ""))} for it in items]
     res = _cards(key=key, data={"items": items, "selected": selected}, on_pick_change=lambda: None)
     return getattr(res, "pick", None)
 
@@ -569,6 +640,8 @@ _tiles = st.components.v2.component("english_kid_tiles", css=_TILES_CSS, js=_TIL
 def kid_tiles(items: list[dict], selected: str, key: str, small: bool = False, cols: int | None = None,
               theme: str = "space"):
     """items: [{'key','label','img' ou 'emoji', 'lock'?}]. Cartões ilustrados; cols = quantos por linha. Retorna a chave tocada."""
+    from services.i18n import T
+    items = [{**it, "label": T(it.get("label", ""))} for it in items]
     res = _tiles(key=key, data={"items": items, "selected": selected, "small": small, "cols": cols, "theme": theme},
                  on_pick_change=lambda: None)
     return getattr(res, "pick", None)
@@ -709,6 +782,7 @@ export default function (component) {
     if (!/youtube/.test(ev.origin || '')) return;
     let m; try { m = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data; } catch (e) { return; }
     const st = m && m.info && m.info.playerState;
+    if (st !== undefined && st !== null) window.__epYTPlaying = (st === 1 || st === 3);
     if (st === 0 && box.isConnected && !box.dataset.ended) {
       box.dataset.ended = '1';
       // cobre as sugestões de outros vídeos do YouTube que aparecem no fim

@@ -79,6 +79,8 @@ COLORS = {
 
 def nav(items: list[dict], current: str, theme: str, bar: bool = True, key: str = "nav_bar", title: str = "Menu"):
     """items: [{'key','icon','label'}]. Retorna a chave escolhida (ou None)."""
+    from services.i18n import T
+    items = [{**it, "label": T(it.get("label", ""))} for it in items]
     res = _nav(key=key, data={"items": items, "current": current, "bar": bar, "title": title,
                               "colors": COLORS.get(theme, COLORS["classic"])}, on_go_change=lambda: None)
     return getattr(res, "go", None)

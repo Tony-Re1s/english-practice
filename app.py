@@ -14,12 +14,13 @@ from config import (DEFAULT_LEVEL, LEVELS, LIVE_MAX_SESSION_MIN, LIVE_MODEL, LIV
                     MAX_HISTORY_TURNS, PROVIDER_LABEL, PROVIDERS)
 from prompts import (FREE_TALK_OPEN, FREE_TALK_ROLE, LIVE_SYSTEM, SCENARIOS, START_MESSAGE, TOPIC_ROLE,
                      TUTOR_SYSTEM)
-from services import album, compete, family, galaxy, nav, notify, report, rewards, space, db, learn, live, llm, users, voice
+from services import album, compete, family, galaxy, i18n, nav, notify, report, rewards, space, db, learn, live, llm, users, voice
 from syllabus import topic_for
 from services.voice_chat import voice_chat
 
 st.set_page_config(page_title="English Practice", page_icon="static/favicon.png", layout="centered",
                    initial_sidebar_state="collapsed")
+i18n.install()   # menus em inglês no perfil adulto (o infantil e a área dos pais seguem em português)
 ui.inject_css()
 ui.install_app_icons()
 
@@ -153,7 +154,7 @@ def sound_cfg() -> dict:
             ss.sound = json.loads((db.get_pref(email, "sons") if db.enabled() else None) or "{}")
         except Exception:
             ss.sound = {}
-        for k, v in {"music": True, "taps": True, "fx": True, "vol": 40, "muted": False}.items():
+        for k, v in {"music": True, "taps": True, "fx": True, "vol": 55, "muted": False}.items():
             ss.sound.setdefault(k, v)
     return ss.sound
 
@@ -163,9 +164,17 @@ def save_sound() -> None:
         db.set_pref(email, "sons", json.dumps(ss.sound))
 
 
-_mute = ui.apply_theme(current_theme(), sound_cfg())
-if _mute in ("on", "off") and (_mute == "on") != ss.sound["muted"]:
-    ss.sound["muted"] = _mute == "on"
+_th = current_theme()
+_snd = dict(sound_cfg())
+if _th == "london":          # adulto: só a trilha de Londres; os "plins" e festas são do infantil
+    _snd.update(taps=False, fx=False)
+_snd.update(talking=bool(ss.get("started")) and not ss.get("summary"), en=bool(ss.get("_ui_en")))
+_ev = ui.apply_theme(_th, _snd) or {}
+if _ev.get("mute") in ("on", "off") and (_ev["mute"] == "on") != ss.sound["muted"]:
+    ss.sound["muted"] = _ev["mute"] == "on"
+    save_sound()
+if isinstance(_ev.get("vol"), (int, float)) and int(_ev["vol"]) != ss.sound["vol"]:
+    ss.sound["vol"] = int(_ev["vol"])
     save_sound()
 voice.set_kid_voice(bool(LEVELS.get(ss.level, {}).get("kids")))   # modo Criança: voz infantil de robozinho
 if prof.level_locked:
@@ -389,6 +398,10 @@ if FAMILY:
     elif LEVELS.get(ss.level, {}).get("kids"):
         ss.level = DEFAULT_LEVEL     # na área dos pais, o app volta ao inglês de adulto
 KIDS_PROFILE = (not prof.is_admin) and bool(LEVELS.get(prof.level or "", {}).get("kids"))
+if "ui_lang" not in ss:
+    ss.ui_lang = (db.get_pref(email, "ui_lang") if db.enabled() else None) or "en"
+# inglês só no perfil adulto: nunca no infantil nem na conta da família (os pais podem não falar inglês)
+ss._ui_en = (ss.ui_lang == "en") and not FAMILY and not KIDS_PROFILE and not LEVELS.get(ss.level, {}).get("kids")
 NAV_ITEMS = [("inicio", "💬", "Falar"), ("aprender", "📚", "Aprender"), ("historico", "📊", "Histórico"),
              ("pais", "👨‍👩‍👧", "Pais"), ("ajustes", "⚙️", "Ajustes"), ("usuarios", "👥", "Usuários")]
 if KIDS_PROFILE:
@@ -539,6 +552,19 @@ def settings_view() -> None:
             db.set_pref(email, "tema", pick)
         st.rerun()
     st.caption("No nível Infantil o app vira sempre o tema Espaço.")
+    if not FAMILY and not KIDS_PROFILE:
+        langs = {"en": "🇬🇧 English", "pt": "🇧🇷 Português"}
+        lp = st.segmented_control("🌐 Idioma dos menus", list(langs), format_func=lambda k: langs[k],
+                                  default=ss.ui_lang, key="ui_lang_pick")
+        if lp and lp != ss.ui_lang:
+            ss.ui_lang = lp
+            # seletores com chave guardam o texto exibido: zera para não ficarem presos no idioma antigo
+            for k in ("learn_level", "set_level", "theme_pick", "kid_limit_pick", "kid_minutes_pick", "signup_mode",
+                      "fam_pick", "ui_lang_pick"):
+                ss.pop(k, None)
+            if db.enabled():
+                db.set_pref(email, "ui_lang", lp)
+            st.rerun()
     if KIDS_PROFILE or LEVELS.get(ss.level, {}).get("kids") or ss.get("astro"):
         with st.expander("👩‍🚀 Meu astronauta (nome, rosto e nave)"):
             astro_form("astro_settings", "Mude o nome, quem você é no jogo ou a nave quando quiser:")
@@ -561,12 +587,15 @@ def settings_view() -> None:
             db.set_pref("__app__", "kid_minutes", str(new_m))
             st.toast("Tempo atualizado ✅")
         st.caption("Conta só o tempo usando de verdade. Quando acaba, o Bip se despede e o app só volta no dia seguinte.")
-    if current_theme() == "space":
+    if current_theme() in ("space", "london"):
         with st.expander("🔊 Sons e música", expanded=KIDS_PROFILE):
             snd = sound_cfg()
             changed = False
-            for k, lab in (("music", "🎵 Música de fundo"), ("taps", "👆 Som quando toca nos botões"),
-                           ("fx", "🎉 Sons de acerto, erro e festa")):
+            opts = (("music", "🎵 Música de fundo"), ("taps", "👆 Som quando toca nos botões"),
+                    ("fx", "🎉 Sons de acerto, erro e festa"))
+            if current_theme() == "london":
+                opts = opts[:1]
+            for k, lab in opts:
                 v = st.toggle(lab, value=bool(snd[k]) and not snd["muted"], key=f"snd_{k}")
                 if v != (bool(snd[k]) and not snd["muted"]):
                     snd[k], snd["muted"], changed = v, False, True
@@ -574,7 +603,8 @@ def settings_view() -> None:
                             disabled=not snd["music"])
             if vol != snd["vol"]:
                 snd["vol"], changed = vol, True
-            st.caption("Também dá para silenciar tudo rapidinho no botão 🔊 no canto de cima da tela.")
+            st.caption("Também dá para mudar o volume ou silenciar tudo no botão 🔊 no canto de cima da tela. "
+                       "A música abaixa sozinha quando o app fala ou um vídeo toca, e fica desligada durante a conversa por voz.")
             if changed:
                 save_sound()
                 st.rerun()

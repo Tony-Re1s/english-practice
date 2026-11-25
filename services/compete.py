@@ -10,6 +10,9 @@ from services import db, galaxy
 
 BRT = timezone(timedelta(hours=-3))
 PTS_STAR, PTS_TURN, PTS_VIDEO = 10, 2, 15
+# Corrida justa: cada um tem a sua linha de chegada da semana. Criança chega com ~15 estrelas;
+# adulto precisa do dobro (ex.: 15 estrelas + 75 falas). Quem chega mais perto da própria meta lidera.
+GOAL_KID, GOAL_ADULT = 150, 300
 
 
 def week_tag() -> str:
@@ -38,12 +41,21 @@ def board() -> list[dict]:
     for u, n in act["videos"].items():
         pts.setdefault(u, {"stars": 0, "turns": 0, "videos": 0})["videos"] = int(n)
     astros = db.pref_all("astronauta")
+    # criança = cadastrada com nível Infantil; sem cadastro, quem só fez missões infantis e não conversou como adulto
+    kids = {u["email"] for u in db.list_users() if u.get("level") == "crianca"}
+    adult_like = {e["user_email"] for e in act["exercises"] if e["level"] != "crianca"}
+    kids |= {e["user_email"] for e in act["exercises"] if e["level"] == "crianca"} - adult_like
+    for u in kids:
+        pts.setdefault(u, {"stars": 0, "turns": 0, "videos": 0})
     out = []
     for u, p in pts.items():
         name, avatar = profile(u, astros)
         total = p["stars"] * PTS_STAR + p["turns"] * PTS_TURN + p["videos"] * PTS_VIDEO
-        out.append({"email": u, "name": name, "avatar": avatar, "points": total, **p})
-    return sorted(out, key=lambda r: -r["points"])
+        goal = GOAL_KID if u in kids else GOAL_ADULT
+        pct = min(100, round(100 * total / goal))
+        out.append({"email": u, "name": name, "avatar": avatar, "points": total, "goal": goal, "pct": pct,
+                    "kid": u in kids, **p})
+    return sorted(out, key=lambda r: (-r["pct"], -r["points"]))
 
 
 def load_best(email: str) -> dict:

@@ -56,6 +56,32 @@ def translate(text: str, api_key: str | None) -> tuple[dict, dict]:
     return _tool_call(system, text.strip(), TRANSLATE_TOOL, api_key, max_tokens=900)
 
 
+KIDS_TRANSLATE_TOOL = {
+    "name": "kids_word",
+    "description": "A word or tiny phrase translated for a Brazilian child aged 7-8.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "english": {"type": "string", "description": "The English word or tiny phrase (simple, the most common way a child says it)."},
+            "portuguese": {"type": "string", "description": "The Portuguese meaning."},
+            "emoji": {"type": "string", "description": "1-3 emojis that show the meaning."},
+            "say_like": {"type": "string", "description": "How to pronounce the English, written with Portuguese sounds, syllables separated by '-', stressed syllable in CAPS (e.g. 'DÓ-gui')."},
+            "example_en": {"type": "string", "description": "A tiny, happy example sentence in English (max 6 words)."},
+            "example_pt": {"type": "string", "description": "The example in Portuguese."},
+        },
+        "required": ["english", "portuguese", "emoji", "say_like", "example_en", "example_pt"],
+    },
+}
+
+
+def translate_kids(text: str, api_key: str | None) -> tuple[dict, dict]:
+    system = ("You help a Brazilian child aged 7-8 learn English words. The child types or says a word or tiny phrase, "
+              "usually in Portuguese (sometimes in English). Give the simple, child-friendly English (or Portuguese) "
+              "version. Never explain grammar. Keep it short, warm and safe for children; if the request is not "
+              "appropriate for a child, answer with a friendly neutral word instead.")
+    return _tool_call(system, text.strip(), KIDS_TRANSLATE_TOOL, api_key, max_tokens=400)
+
+
 # --- Exercícios de gramática -------------------------------------------------------------
 EXERCISE_TOOL = {
     "name": "exercise",

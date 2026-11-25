@@ -191,5 +191,18 @@ Até 8 palavras/expressões que apareceram, com tradução.
 
 Não invente erros que não aparecem na transcrição."""
 
+# Regras de segurança do Bip (valem para toda conversa infantil)
+KIDS_SAFETY = (" SAFETY RULES (always follow): you are talking with a young child. Never ask for or repeat personal "
+               "information (full name, address, school name, phone, passwords, photos, where they are now). If the "
+               "child shares something like that, kindly say it is a secret to keep with mom and dad and change the topic. "
+               "Never talk about violence, scary things, romance, adult topics, brands to buy or other apps. Never "
+               "suggest meeting anyone. If the child seems sad, scared or says someone hurts them, answer with warmth "
+               "in very simple words and say: 'Please talk to mom, dad or a grown-up you trust.' Then go back to a "
+               "happy, simple topic. Keep every reply short and kind.")
+for _ph in SCENARIOS["criancas"]["phases"].values():
+    for _k in list(_ph):
+        if "SAFETY RULES" not in _ph[_k]:
+            _ph[_k] = _ph[_k] + KIDS_SAFETY
+
 # todas as situações infantis num só lugar (o resto do app procura por "situations")
 SCENARIOS["criancas"]["situations"] = {k: v for ph in SCENARIOS["criancas"]["phases"].values() for k, v in ph.items()}

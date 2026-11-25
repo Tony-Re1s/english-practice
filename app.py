@@ -331,6 +331,30 @@ def bottom_nav(bar: bool = True) -> None:
 
 
 # --- Tela: histórico -------------------------------------------------------------
+def learned_words(who: str, lvl: str = "crianca", days: int | None = None) -> tuple[list[str], list[str]]:
+    """(palavras que já acerta, palavras para treinar), a partir das respostas das missões."""
+    import datetime as _dt
+    status: dict[str, bool] = {}
+    since = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)) if days else None
+    for a in (db.attempts(who, lvl) if db.enabled() else []):
+        if since and a["ts"] and a["ts"] < since:
+            continue
+        ex = a.get("content") or {}
+        ans = a.get("answers") or {}
+        if isinstance(ex, str):
+            ex = json.loads(ex)
+        if isinstance(ans, str):
+            ans = json.loads(ans)
+        for i, q in enumerate(ex.get("questions") or [], 1):
+            word = str(q.get("answer", "")).strip()
+            if not word or str(i) not in ans or len(word.split()) > 3:
+                continue
+            status[word.lower()] = learn.check_answer(q, ans[str(i)], lenient=True)   # vale a tentativa mais recente
+    know = sorted(w for w, ok in status.items() if ok)
+    review = sorted(w for w, ok in status.items() if not ok)
+    return know, review
+
+
 def family_report(who: str) -> str:
     """Texto curto e animado sobre os últimos 7 dias, pronto para mandar para a família."""
     r = db.week_report(who)
@@ -346,6 +370,14 @@ def family_report(who: str) -> str:
             lines.append(f"   • {info['en']} — {topic_for(e['level'], e['num'])[0]}")
         days = db.kid_days(who, kid_ex[0]["level"])
         lines.append(f"🔥 Sequência: {rewards.streak(days)} dia(s) seguidos")
+        know, review = learned_words(who, kid_ex[0]["level"], days=7)
+        if know:
+            lines.append(f"✅ Palavras que acertou: {', '.join(know[:15])}")
+        if review:
+            lines.append(f"🔁 Para treinar: {', '.join(review[:10])}")
+        mins = kid_minutes_today(who)
+        if mins:
+            lines.append(f"⏳ Tempo no app hoje: {mins} min")
     other = [e for e in r["exercises"] if not LEVELS.get(e["level"], {}).get("kids")]
     if other:
         lines.append(f"📝 Exercícios feitos: {len(other)}")
@@ -370,10 +402,18 @@ def history_view() -> None:
         people = sorted(set(db.known_users()) | {email})
         who = st.selectbox("Pessoa", people, index=people.index(email))
     with st.expander("🏁 Corrida Espacial da semana (todo mundo)", expanded=False):
-        st.caption("⭐ estrela de exercício = 10 · 💬 fala na conversa = 2 · 🎬 vídeo = 15 · zera toda segunda")
-        st.markdown(race_board_html(compete.board(), "points", "pts"), unsafe_allow_html=True)
+        st.caption(f"Cada um corre até a própria meta (criança {compete.GOAL_KID} pts, adulto {compete.GOAL_ADULT} pts). "
+                   "⭐ estrela = 10 · 💬 fala = 2 · 🎬 vídeo = 15 · recomeça toda segunda")
+        st.markdown(race_track_html(compete.board()), unsafe_allow_html=True)
         st.markdown("**⚡ Recordes do Desafio Relâmpago**")
         st.markdown(race_board_html(compete.challenge_board(), "score", "pts"), unsafe_allow_html=True)
+    know, review = learned_words(who)
+    if know or review:
+        with st.expander(f"📚 O que aprendeu no Infantil ({len(know)} palavras)", expanded=False):
+            st.markdown("**✅ Já acerta:** " + (", ".join(know) if know else "—"))
+            st.markdown("**🔁 Ainda erra (vale treinar junto):** " + (", ".join(review) if review else "nada! 🎉"))
+            st.caption("Conta a tentativa mais recente de cada palavra nas missões. As conversas dele ficam em "
+                       "🗂️ Conversas anteriores, mais abaixo.")
     with st.expander("📨 Resumo da semana para a família", expanded=False):
         txt = family_report(who)
         st.text_area("Resumo", txt, height=220, label_visibility="collapsed")
@@ -477,6 +517,22 @@ def settings_view() -> None:
             db.set_pref("__app__", "kid_limit", str(new_lim))
             st.toast("Limite atualizado ✅")
         st.caption("Refazer planetas que ele já visitou e o ⚡ Desafio nunca contam no limite.")
+        mopts = {0: "Sem limite", 15: "15 min", 30: "30 min", 45: "45 min", 60: "1 hora"}
+        cur_m = kid_minutes_limit()
+        new_m = st.segmented_control("⏳ Tempo de uso por dia (perfil infantil)", list(mopts),
+                                     format_func=lambda k: mopts[k], default=cur_m if cur_m in mopts else 0,
+                                     key="kid_minutes_pick")
+        if new_m is not None and new_m != cur_m:
+            db.set_pref("__app__", "kid_minutes", str(new_m))
+            st.toast("Tempo atualizado ✅")
+        st.caption("Conta só o tempo usando de verdade. Quando acaba, o Bip se despede e o app só volta no dia seguinte.")
+    with st.expander("🔒 Privacidade e dados"):
+        st.markdown(PRIVACY_TEXT)
+        if db.enabled():
+            sure = st.checkbox("Quero apagar todas as conversas desta conta (não dá para desfazer).", key="del_conv_ok")
+            if st.button("🗑️ Apagar minhas conversas", disabled=not sure, key="del_conv"):
+                n = db.delete_conversations(email)
+                st.success(f"Pronto: {n} conversa(s) apagada(s).")
     st.divider()
     st.markdown(f"**Conta:** {email}" + (" · administrador" if prof.is_admin else ""))
     lv = LEVELS.get(prof.level or "", None)
@@ -591,6 +647,25 @@ def learn_level() -> str:
 AVATARS = ["🧑🏻‍🚀", "🧑🏽‍🚀", "🧑🏿‍🚀", "👦🏻", "👦🏽", "👦🏿", "👧🏻", "👧🏽", "👧🏿", "🐶", "🐱", "🦁", "🐼", "🦖", "🤖"]
 
 
+PRIVACY_TEXT = """
+**O que o app faz:** é um app de prática de inglês. A criança faz missões, ganha estrelas e conversa por voz com o
+robozinho Bip. Não tem anúncios, compras nem conversa com outras pessoas.
+
+**Para onde vão os dados:**
+- 🎤 **Voz**: a gravação da fala é enviada ao **Groq** só para virar texto. O app não guarda o áudio.
+- 💬 **Conversa e missões**: o texto vai para o **Claude (Anthropic)** para criar as respostas e as missões. No modo
+  "ao vivo", vai para o **Gemini (Google)**.
+- 🔊 **Voz do Bip**: o texto é enviado a um serviço de voz (Microsoft Edge, Google ou OpenAI) para virar áudio.
+- 🗄️ **Guardado no banco do app (Neon)**: e-mail da conta, nome do astronauta, conversas em texto, respostas das
+  missões, estrelas e tempo de uso. O e-mail é usado só para entrar.
+- 🎬 **Vídeos**: vêm do YouTube no modo de privacidade reforçada (sem cookies de anúncio).
+
+**Combinados de segurança:** o Bip nunca pede dados pessoais (endereço, escola, telefone). Se a criança contar algo
+assim, ele muda de assunto e diz para falar com os pais. O responsável pode **ler todas as conversas** no Histórico,
+pedir para **apagar tudo** em Ajustes, e escolher limite de **tempo** e de **planetas por dia**.
+"""
+
+
 def kids_astro() -> tuple[str, str]:
     if "astro" not in ss:
         ss.astro = (db.get_pref(email, "astronauta") if db.enabled() else None) or ""
@@ -602,6 +677,41 @@ def kids_avatar() -> str:
     kids_astro()
     parts = ss.astro.split("|")
     return parts[2] if len(parts) > 2 and parts[2] else "🧑‍🚀"
+
+
+def kid_minutes_limit() -> int:
+    try:
+        return int((db.get_pref("__app__", "kid_minutes") if db.enabled() else None) or 0)
+    except ValueError:
+        return 0
+
+
+def kid_minutes_today(who: str) -> int:
+    import datetime as _dt
+    day = _dt.datetime.now(compete.BRT).strftime("%Y-%m-%d")
+    try:
+        return int(float((db.get_pref(who, f"tempo:{day}") if db.enabled() else None) or 0) // 60)
+    except ValueError:
+        return 0
+
+
+def kid_time_tick() -> None:
+    """Soma o tempo de uso de hoje (conta só intervalos curtos entre toques = tempo ativo de verdade)."""
+    import datetime as _dt
+    import time as _t
+    now = _t.time()
+    last = ss.get("kid_tick")
+    ss.kid_tick = now
+    if last is None or not db.enabled():
+        return
+    delta = now - last
+    if 0 < delta <= 120:
+        day = _dt.datetime.now(compete.BRT).strftime("%Y-%m-%d")
+        try:
+            cur = float(db.get_pref(email, f"tempo:{day}") or 0)
+        except ValueError:
+            cur = 0
+        db.set_pref(email, f"tempo:{day}", str(round(cur + delta, 1)))
 
 
 def daily_limit() -> int:
@@ -666,6 +776,32 @@ def pregen_missions(lvl: str, nums: list[int]) -> None:
             finally:
                 state["running"].discard(tag)
         threading.Thread(target=work, daemon=True).start()
+
+
+def race_track_html(rows: list[dict]) -> str:
+    """Corrida: cada um num trilho até a própria linha de chegada (meta da semana)."""
+    if not rows:
+        return '<div class="kp-card" style="text-align:center">Ninguém correu ainda esta semana. Seja o primeiro! 🚀</div>'
+    medals = ["🥇", "🥈", "🥉"]
+    out = []
+    for i, r in enumerate(rows[:8]):
+        me = r["email"] == email
+        pos = min(92, max(0, r["pct"] * 0.92))
+        done = r["pct"] >= 100
+        out.append(f'<div style="margin:10px 0;padding:8px 10px 10px;border-radius:16px;'
+                   f'background:{"rgba(255,224,102,.16)" if me else "rgba(255,255,255,.06)"};'
+                   f'border:2px solid {"#FFE066" if me else "rgba(126,232,255,.25)"}">'
+                   f'<div style="display:flex;justify-content:space-between;font-weight:900">'
+                   f'<span>{medals[i] if i < 3 else i + 1} {html_escape(r["name"])}{" (você)" if me else ""}'
+                   f' <small style="font-weight:700;color:#AFC0E8">{"criança" if r["kid"] else "adulto"}</small></span>'
+                   f'<span>{r["pct"]}%</span></div>'
+                   f'<div style="position:relative;height:40px;margin-top:4px;border-radius:99px;'
+                   f'background:repeating-linear-gradient(90deg,rgba(255,255,255,.08) 0 12px,rgba(255,255,255,.02) 12px 24px)">'
+                   f'<div style="position:absolute;right:6px;top:6px;font-size:24px">🏁</div>'
+                   f'<div style="position:absolute;left:{pos}%;top:2px;font-size:30px;transition:left 1s">'
+                   f'{"🏆" if done else r["avatar"]}</div></div>'
+                   f'<div style="font-size:12px;color:#AFC0E8;margin-top:2px">{r["points"]} de {r["goal"]} pts</div></div>')
+    return "".join(out)
 
 
 def race_board_html(rows: list[dict], key: str, unit: str) -> str:
@@ -740,9 +876,10 @@ def race_view(lvl: str) -> None:
                 unsafe_allow_html=True)
     st.markdown(race_board_html(compete.challenge_board(), "score", "pts"), unsafe_allow_html=True)
     st.markdown('<div style="font-size:1.3rem;font-weight:900;margin:18px 0 4px">🏁 Corrida Espacial da semana</div>'
-                '<div style="color:#AFC0E8;font-size:.9rem">⭐ estrela = 10 · 💬 fala na conversa = 2 · '
-                '🎬 vídeo = 15 · zera toda segunda</div>', unsafe_allow_html=True)
-    st.markdown(race_board_html(compete.board(), "points", "pts"), unsafe_allow_html=True)
+                '<div style="color:#AFC0E8;font-size:.9rem">Cada um corre até a sua linha de chegada: criança '
+                f'{compete.GOAL_KID} pts, adulto {compete.GOAL_ADULT} pts. ⭐ estrela = 10 · 💬 fala = 2 · 🎬 vídeo = 15 · '
+                'recomeça toda segunda.</div>', unsafe_allow_html=True)
+    st.markdown(race_track_html(compete.board()), unsafe_allow_html=True)
 
 
 def challenge_play(ch: dict) -> None:
@@ -770,10 +907,9 @@ def challenge_play(ch: dict) -> None:
     st.markdown(f'<div class="kp-card"><div class="kp-ins">{html_escape(ins)}</div>'
                 + (f'<div class="kp-q">{html_escape(prompt)}</div>' if prompt else "") + '</div>', unsafe_allow_html=True)
     tag = f"{ch['id']}:{ch['i']}"
-    said = ss.setdefault("ch_said", set())
-    if tag not in said:
-        said.add(tag)
-        _say(say)
+    ui.say_now(say, tag, key="say_now_ch")   # voz do aparelho: instantânea, não gasta o tempo do desafio
+    if st.button("🔊 Ouvir de novo", key=f"ch_re_{tag}"):
+        ui.say_now(say, tag + f":{_t.time()}", key="say_now_ch2")
     emo = q.get("emojis") or []
     cols = st.columns(2)
     for j, opt in enumerate(q["options"]):
@@ -849,6 +985,8 @@ def kids_galaxy(lvl: str, done: dict) -> None:
         say, sub = "This galaxy is still far away! 🔭", f"Esta galáxia ainda está longe! Primeiro explore {space.stop(nxt)['pt']}."
     goal_ok = len(today_nums) >= rewards.DAILY_GOAL
     hud = [{"t": f"🔥 {streak}"}, {"t": "🎯 ✓" if goal_ok else "🎯 0/1", "ok": goal_ok}, {"t": f"💰 {wallet}"}]
+    if KIDS_PROFILE and kid_minutes_limit():
+        hud.append({"t": f"⏳ {max(0, kid_minutes_limit() - kid_minutes_today(email))} min"})
     in_gal = sum(1 for n in range(first, last + 1) if n in done)
     left = 10 - in_gal
     boss = space.stop(last)["pt"]
@@ -1336,6 +1474,11 @@ def videos_tab(lvl: str) -> None:
             st.error(f"Erro ao iniciar: {e}")
 
 
+def _now_tag() -> str:
+    import time as _t
+    return str(_t.time())
+
+
 def translator_tab() -> None:
     kids = bool(LEVELS.get(ss.level, {}).get("kids"))
     if kids:
@@ -1357,6 +1500,33 @@ def translator_tab() -> None:
             go = True
         except Exception as e:
             st.error(f"Não entendi o áudio: {e}")
+    if go and text.strip() and kids:
+        with st.spinner("O Bip está procurando... 🤖"):
+            try:
+                ss.tr_kid, u = learn.translate_kids(text, prof.keys.get("anthropic"))
+                ss.tr_kid["_tag"] = f"{text}:{len(text)}:{id(u)}"
+                log(step="tradutor", provider="Anthropic", model=u["model"], ok=True,
+                    input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
+            except Exception as e:
+                st.error(f"Não consegui achar: {e}")
+    if kids:
+        k = ss.get("tr_kid")
+        if k:
+            st.markdown(f'<div class="kp-card" style="text-align:center">'
+                        f'<div style="font-size:64px;line-height:1.1">{html_escape(k.get("emoji", ""))}</div>'
+                        f'<div style="font-size:2.4rem;font-weight:900;color:#FFE066">{html_escape(k.get("english", ""))}</div>'
+                        f'<div style="font-size:1.1rem;color:#AFC0E8">🗣️ fala-se <b>{html_escape(k.get("say_like", ""))}</b></div>'
+                        f'<div style="font-size:1.2rem;margin-top:6px">🇧🇷 {html_escape(k.get("portuguese", ""))}</div>'
+                        f'<div style="margin-top:10px;padding:8px 12px;border-radius:14px;background:rgba(255,255,255,.08)">'
+                        f'<b>{html_escape(k.get("example_en", ""))}</b><br><small>{html_escape(k.get("example_pt", ""))}</small>'
+                        f'</div></div>', unsafe_allow_html=True)
+            ui.say_now(k.get("english", ""), k.get("_tag", ""), key="say_now_tr")
+            c1, c2 = st.columns(2)
+            if c1.button("🔊 Ouvir a palavra", width="stretch", key="tr_k1"):
+                ui.say_now(k.get("english", ""), f"w{_now_tag()}", key="say_now_tr2")
+            if c2.button("🔊 Ouvir a frase", width="stretch", key="tr_k2"):
+                ui.say_now(k.get("example_en", ""), f"e{_now_tag()}", key="say_now_tr3")
+        return
     if go and text.strip():
         with st.spinner("Traduzindo..."):
             try:
@@ -1437,6 +1607,29 @@ def learn_view() -> None:
 
 
 # --- Roteamento das telas sem conversa ativa -----------------------------------------------
+if KIDS_PROFILE:
+    kid_time_tick()
+    if db.enabled() and not db.get_pref(email, "consent_parents"):
+        # primeira vez de uma conta infantil: um adulto precisa ler e autorizar (com uma continha, para a criança não pular)
+        st.markdown("## 👨‍👩‍👧 Para os pais ou responsáveis")
+        st.markdown(PRIVACY_TEXT)
+        with st.form("consent"):
+            ok_box = st.checkbox("Sou pai, mãe ou responsável por esta criança e autorizo o uso do app.")
+            q = st.text_input("Para confirmar que é um adulto: quanto é 7 × 8?")
+            if st.form_submit_button("✅ Autorizar", type="primary", width="stretch"):
+                if ok_box and q.strip() == "56":
+                    db.set_pref(email, "consent_parents", _now_tag())
+                    st.rerun()
+                else:
+                    st.error("Marque a caixa e responda a conta corretamente.")
+        st.stop()
+    lim_min = kid_minutes_limit()
+    if lim_min and kid_minutes_today(email) >= lim_min:
+        galaxy.mascot("Time to rest! See you tomorrow! 🌙", f"Hora de descansar! Você já brincou {lim_min} minutos hoje. "
+                      "Seus planetas e estrelas estão guardadinhos. Até amanhã!", key="kid_rest", sound=False)
+        bottom_nav()
+        st.stop()
+
 if ss.view != "inicio":
     {"historico": history_view, "ajustes": settings_view, "usuarios": users_view,
      "aprender": learn_view}.get(ss.view, history_view)()

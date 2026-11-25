@@ -289,7 +289,7 @@ hr {{ border-color:{t['edge']} !important; }}
 .vid-title {{ color:{t['text']}; }}
 [data-testid="stMainBlockContainer"], .block-container {{ margin-bottom:110px !important; }}
 /* elementos invisíveis (estilos, sons, parallax) não ocupam espaço nem deixam buraco no topo */
-.st-key-head_tags, .st-key-parallax, .st-key-click_sounds,
+.st-key-head_tags, .st-key-parallax, .st-key-click_sounds, .st-key-say_now, [class*='st-key-say_now'],
 [data-testid="stElementContainer"]:has(> .stMarkdown [data-testid="stMarkdownContainer"] > style:only-child) {{
   display:none !important; }}
 /* celular e tablet */
@@ -541,6 +541,30 @@ def album_grid(items: list[dict], key: str = "album") -> None:
     _album(key=key, data={"items": items})
 
 
+# --- Fala instantânea pela voz do próprio aparelho (sem esperar o servidor) -----------------
+_SAY_JS = """
+export default function (component) {
+  const { data } = component;
+  if (!data || !data.text || window.__epSaid === data.tag) return;
+  window.__epSaid = data.tag;
+  try {
+    speechSynthesis.cancel();
+    const u = new SpeechSynthesisUtterance(data.text); u.lang = 'en-US'; u.rate = data.rate || .85; u.pitch = data.pitch || 1.25;
+    const vs = speechSynthesis.getVoices();
+    const v = vs.find(v => /en-US/.test(v.lang) && /(Samantha|Ava|Aria|Jenny|Google US|Allison|Nicky)/.test(v.name)) || vs.find(v => /^en/.test(v.lang));
+    if (v) u.voice = v;
+    speechSynthesis.speak(u);
+  } catch (e) {}
+}
+"""
+_say_now = st.components.v2.component("english_say_now", js=_SAY_JS)
+
+
+def say_now(text: str, tag: str, key: str = "say_now") -> None:
+    """Fala o texto em inglês na hora, com a voz do aparelho (uma vez por tag)."""
+    _say_now(key=key, data={"text": text, "tag": tag})
+
+
 def dive_bg(url: str, surface: bool = True) -> None:
     """Fundo de "dentro do planeta": entra com um zoom de mergulho e depois segue com o movimento lento."""
     bg = (f"url('{url}') center/cover no-repeat" if surface else
@@ -579,12 +603,29 @@ export default function (component) {
     if (!/youtube/.test(ev.origin || '')) return;
     let m; try { m = typeof ev.data === 'string' ? JSON.parse(ev.data) : ev.data; } catch (e) { return; }
     const st = m && m.info && m.info.playerState;
-    if (st === 0 && box.isConnected && !box.dataset.ended) { box.dataset.ended = '1'; setTriggerValue('ended', data.id); }
+    if (st === 0 && box.isConnected && !box.dataset.ended) {
+      box.dataset.ended = '1';
+      // cobre as sugestões de outros vídeos do YouTube que aparecem no fim
+      const cov = document.createElement('div'); cov.className = 'yt-end';
+      cov.innerHTML = '<div>🎉 Fim!</div><button>🔁 Ver de novo</button>';
+      cov.querySelector('button').addEventListener('click', () => {
+        const cmd = (f, a) => frame.contentWindow.postMessage(JSON.stringify({ event: 'command', func: f, args: a || [] }), '*');
+        cmd('seekTo', [0, true]); cmd('playVideo'); cov.remove(); delete box.dataset.ended;
+      });
+      box.appendChild(cov);
+      setTriggerValue('ended', data.id);
+    }
   };
   window.addEventListener('message', window.__ytListener);
 }
 """
 _YT_CSS = """
+.yt { position:relative; }
+.yt-end { position:absolute; inset:0; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:14px;
+  background:radial-gradient(circle at 50% 40%, #2B3C8F, #0B1030); border-radius:inherit; z-index:3;
+  font-family:'Nunito',system-ui,sans-serif; color:#fff; font-size:28px; font-weight:900; }
+.yt-end button { border:none; border-radius:99px; padding:12px 22px; font-size:18px; font-weight:900; cursor:pointer;
+  background:linear-gradient(180deg,#FFE066,#FFB020); color:#2A1600; box-shadow:0 5px 0 #A86A00; }
 .yt { position:relative; width:100%; aspect-ratio:16/9; border-radius:16px; overflow:hidden; background:#000;
   box-shadow:0 10px 30px rgba(0,0,0,.35); }
 .yt iframe { position:absolute; inset:0; width:100%; height:100%; border:0; }

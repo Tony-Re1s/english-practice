@@ -270,6 +270,20 @@ def exercises_done_map(user_email: str, level: str) -> dict:
     return {r["num"]: (r["score"], r["total"]) for r in rows}
 
 
+def attempts(user_email: str, level: str) -> list[dict]:
+    """Todas as tentativas (mais antigas primeiro) com as respostas, para o relatório do que aprendeu."""
+    return _run("""select d.num, d.score, d.total, d.answers, d.ts, e.content from ep_exercise_done d
+                   left join ep_exercises e on e.level = d.level and e.num = d.num
+                   where d.user_email = %s and d.level = %s order by d.ts""", (user_email, level), fetch=True)
+
+
+def delete_conversations(user_email: str) -> int:
+    rows = _run("select count(*) as n from ep_sessions where user_email = %s", (user_email,), fetch=True)
+    _run("delete from ep_turns where session_id in (select id from ep_sessions where user_email = %s)", (user_email,))
+    _run("delete from ep_sessions where user_email = %s", (user_email,))
+    return rows[0]["n"] if rows else 0
+
+
 def exercise_history(user_email: str, limit: int = 100) -> list[dict]:
     return _run("""select to_char(d.ts at time zone 'America/Sao_Paulo', 'DD/MM HH24:MI') as quando, d.level as nivel,
                           d.num as exercicio, e.topic as tema, d.score || '/' || d.total as nota

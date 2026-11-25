@@ -166,6 +166,12 @@ THEMES = {
         "font": "Cormorant+Garamond:wght@600;700", "title_font": "'Cormorant Garamond', Georgia, serif",
         "panel": "rgba(13,20,36,.60)", "edge": "rgba(201,168,92,.55)", "text": "#F4ECDC", "muted": "#CBBFA6",
         "accent": "#C9A85C", "accent2": "#E6CD8E", "accent_ink": "#1B1408",
+        "btn_bg": "linear-gradient(180deg, #2C3A5E, #1E2945)", "btn_text": "#F4ECDC", "btn_edge": "#C9A85C",
+        "btn_shadow": "#0B101E",
+        "pri_bg": "linear-gradient(180deg, #E6CD8E, #C9A85C)", "pri_text": "#1B1408", "pri_shadow": "#6E5824",
+        "pill_bg": "#1E2945", "pill_edge": "#C9A85C", "pill_on_bg": "linear-gradient(180deg, #E6CD8E, #C9A85C)",
+        "pill_on_text": "#1B1408", "tab_bg": "#1E2945", "tab_text": "#F4ECDC",
+        "tab_on_bg": "linear-gradient(180deg, #E6CD8E, #C9A85C)", "tab_on_text": "#1B1408", "mic": "#E6CD8E",
         "overlay": "linear-gradient(180deg, rgba(10,14,26,.10) 0%, rgba(10,14,26,.35) 45%, rgba(10,14,26,.70) 100%)",
     },
     "space": {
@@ -174,6 +180,12 @@ THEMES = {
         "panel": "rgba(10,12,38,.48)", "edge": "rgba(126,232,255,.35)", "text": "#EAF2FF", "muted": "#AFC0E8",
         "accent": "#38D6F5", "accent2": "#A78BFA", "accent_ink": "#061021",
         "radius": "22px", "btn_h": "54px",
+        "btn_bg": "linear-gradient(180deg, #7C6CFF, #5B47E8)", "btn_text": "#FFFFFF", "btn_edge": "#B8AEFF",
+        "btn_shadow": "#2E2380",
+        "pri_bg": "linear-gradient(180deg, #FFE066, #FFB020)", "pri_text": "#2A1600", "pri_shadow": "#A86A00",
+        "pill_bg": "#1C2A66", "pill_edge": "#5FE3FF", "pill_on_bg": "linear-gradient(180deg, #FFE066, #FFB020)",
+        "pill_on_text": "#2A1600", "tab_on_bg": "linear-gradient(180deg, #FFE066, #FFB020)", "tab_on_text": "#2A1600",
+        "tab_bg": "#1C2A66", "tab_text": "#EAF2FF", "mic": "#FFD23F",
         "extra_css": (".stButton button p, button[data-variant] p { font-weight:800 !important; font-size:1.05rem !important; } "
                       ".stButton button:active, button[data-variant]:active { animation: ep-pop .35s ease !important; } "
                       "@keyframes ep-pop { 0% { transform:scale(.9) } 55% { transform:scale(1.06) } 100% { transform:scale(1) } }"),
@@ -211,48 +223,69 @@ def theme_css(name: str) -> str:
 .hero p {{ color:{t['muted']} !important; }}
 .brand span {{ color:{t['text']} !important; font-family:{t['title_font']} !important; font-size:1.3rem !important; }}
 .pill {{ background:rgba(255,255,255,.08) !important; color:{t['accent2']} !important; border-color:{t['edge']} !important; }}
-/* botões, pílulas e abas */
-.stButton button[kind="secondary"], button[data-variant] {{
-  background:rgba(255,255,255,.09) !important; color:{t['text']} !important; border:1px solid {t['edge']} !important;
-  box-shadow:0 4px 0 rgba(0,0,0,.35), 0 6px 14px rgba(0,0,0,.25);
-  transition: transform .12s ease, box-shadow .12s ease, background .2s ease, filter .2s ease; }}
-.stButton button[kind="secondary"] p, button[data-variant] p {{ color:{t['text']} !important; }}
-/* botões com cara de "apertável": sobem no hover, afundam no toque */
-.stButton button, button[data-variant], [data-testid="stFormSubmitButton"] button,
+/* botões, pílulas e abas: cores sólidas e fortes, que aparecem bem no fundo escuro */
+.stButton button[kind="secondary"], [data-testid="stPopover"] button, [data-testid="stLinkButton"] a,
+[data-testid="stDownloadButton"] button {{
+  background:{t['btn_bg']} !important; color:{t['btn_text']} !important; border:2px solid {t['btn_edge']} !important;
+  box-shadow:0 5px 0 {t['btn_shadow']}, 0 8px 18px rgba(0,0,0,.35) !important;
+  transition: transform .12s ease, box-shadow .12s ease, filter .2s ease; }}
+.stButton button[kind="secondary"] *, [data-testid="stPopover"] button *, [data-testid="stLinkButton"] a *,
+[data-testid="stDownloadButton"] button * {{ color:{t['btn_text']} !important; fill:{t['btn_text']} !important; }}
+.stButton button[kind="primary"], [data-testid="stFormSubmitButton"] button {{
+  background:{t['pri_bg']} !important; color:{t['pri_text']} !important; border:none !important;
+  box-shadow:0 5px 0 {t['pri_shadow']}, 0 8px 22px rgba(0,0,0,.4) !important; }}
+.stButton button[kind="primary"] *, [data-testid="stFormSubmitButton"] button * {{ color:{t['pri_text']} !important; font-weight:800 !important; }}
+button[data-variant] {{ background:{t['pill_bg']} !important; border:2px solid {t['pill_edge']} !important;
+  box-shadow:0 4px 0 rgba(0,0,0,.45) !important; transition: transform .12s ease, box-shadow .12s ease; }}
+button[data-variant] * {{ color:{t['btn_text']} !important; font-weight:700; }}
+button[data-variant][aria-checked="true"], button[data-variant][data-selected="true"] {{
+  background:{t['pill_on_bg']} !important; border-color:transparent !important; }}
+button[data-variant][aria-checked="true"] *, button[data-variant][data-selected="true"] * {{ color:{t['pill_on_text']} !important; font-weight:800 !important; }}
+.stButton button, button[data-variant], [data-testid="stFormSubmitButton"] button, [data-testid="stPopover"] button,
 [data-testid="stLinkButton"] a, [data-testid="stDownloadButton"] button {{
-  border-radius:{t.get('radius', '14px')} !important; min-height:{t.get('btn_h', '44px')};
-  -webkit-tap-highlight-color: transparent; }}
-@media (hover:hover) {{ .stButton button:hover, button[data-variant]:hover, [data-testid="stFormSubmitButton"] button:hover {{
-  transform:translateY(-2px); filter:brightness(1.12); background-color:rgba(255,255,255,.14); }} }}
-.stButton button:active, button[data-variant]:active, [data-testid="stFormSubmitButton"] button:active {{
-  transform:translateY(3px) scale(.97) !important; box-shadow:0 1px 0 rgba(0,0,0,.35) !important; filter:brightness(.95); }}
+  border-radius:{t.get('radius', '14px')} !important; min-height:{t.get('btn_h', '44px')}; -webkit-tap-highlight-color: transparent; }}
+@media (hover:hover) {{ .stButton button:hover, button[data-variant]:hover, [data-testid="stFormSubmitButton"] button:hover,
+  [data-testid="stPopover"] button:hover {{ transform:translateY(-2px); filter:brightness(1.12); }} }}
+.stButton button:active, button[data-variant]:active, [data-testid="stFormSubmitButton"] button:active,
+[data-testid="stPopover"] button:active {{
+  transform:translateY(4px) scale(.98) !important; box-shadow:0 1px 0 rgba(0,0,0,.4) !important; }}
+.stButton button:disabled {{ filter:grayscale(.5) brightness(.75); }}
 .stButton button[kind="primary"], [data-testid="stFormSubmitButton"] button {{ animation: ep-glow 2.6s ease-in-out infinite; }}
-@keyframes ep-glow {{ 0%,100% {{ box-shadow:0 4px 0 rgba(0,0,0,.35), 0 0 0 0 {t['accent']}55; }}
-  50% {{ box-shadow:0 4px 0 rgba(0,0,0,.35), 0 0 22px 4px {t['accent']}66; }} }}
+@keyframes ep-glow {{ 0%,100% {{ filter:brightness(1); }} 50% {{ filter:brightness(1.15) drop-shadow(0 0 10px {t['accent']}); }} }}
+/* abas grandes, como botões */
+[data-testid="stTabs"] [role="tablist"] {{ gap:8px; border:none !important; flex-wrap:wrap; }}
+[data-testid="stTab"] {{ background:{t['tab_bg']} !important; border:2px solid {t['pill_edge']} !important;
+  border-radius:{t.get('radius', '14px')} !important; padding:10px 16px !important; height:auto !important;
+  box-shadow:0 4px 0 rgba(0,0,0,.45); transition: transform .12s ease; }}
+[data-testid="stTab"] p {{ color:{t['tab_text']} !important; font-weight:800 !important; font-size:1.05rem !important; }}
+[data-testid="stTab"][aria-selected="true"] {{ background:{t['tab_on_bg']} !important; border-color:transparent !important; }}
+[data-testid="stTab"][aria-selected="true"] p {{ color:{t['tab_on_text']} !important; }}
+[data-testid="stTab"]:active {{ transform:translateY(3px); }}
+[data-baseweb="tab-highlight"], [data-baseweb="tab-border"] {{ display:none !important; }}
+/* janelas que abrem (loja, álbum, listas): fundo escuro, texto claro */
+[data-testid="stPopoverBody"], [data-baseweb="popover"] > div, [data-baseweb="popover"] ul, [data-baseweb="menu"] {{
+  background:#0E1430 !important; color:#F2F5FF !important; border:2px solid {t['pill_edge']} !important;
+  border-radius:18px !important; }}
+[data-testid="stPopoverBody"] *, [data-baseweb="popover"] li, [data-baseweb="popover"] li * {{ color:#F2F5FF !important; }}
+[data-baseweb="popover"] li:hover, [data-baseweb="popover"] li[aria-selected="true"] {{ background:rgba(255,255,255,.12) !important; }}
+[data-testid="stPopoverBody"] .stButton button[kind="secondary"] *, [data-testid="stPopoverBody"] [data-testid="stCaptionContainer"] p {{ color:{t['btn_text']} !important; }}
+[data-testid="stPopoverBody"] [data-testid="stHorizontalBlock"] {{ flex-wrap:nowrap !important; gap:8px; }}
+[data-testid="stPopoverBody"] [data-testid="stHorizontalBlock"] > div {{ min-width:0 !important; flex:1 1 0 !important; }}
+[data-testid="stPopoverBody"] .stButton button p {{ font-size:.92rem !important; white-space:pre-line; }}
+[data-testid="stPopover"] button p {{ font-weight:800 !important; font-size:1.05rem !important; }}
 {t.get('extra_css', '')}
 /* microfone em destaque */
-[data-testid="stAudioInput"] {{ border:2px solid {t['accent']} !important; border-radius:20px !important;
-  background:rgba(255,255,255,.08) !important; animation: ep-mic 1.8s ease-in-out infinite; padding:4px; }}
-[data-testid="stAudioInput"] button {{ transform:scale(1.35); color:{t['accent']} !important; }}
-[data-testid="stAudioInput"] button svg {{ fill:{t['accent']} !important; color:{t['accent']} !important; }}
-@keyframes ep-mic {{ 0%,100% {{ box-shadow:0 0 0 0 {t['accent']}77; }} 60% {{ box-shadow:0 0 0 10px {t['accent']}00, 0 0 24px {t['accent']}55; }} }}
+[data-testid="stAudioInput"] {{ border:3px solid {t['mic']} !important; border-radius:22px !important;
+  background:rgba(255,255,255,.10) !important; animation: ep-mic 1.8s ease-in-out infinite; padding:8px 6px; min-height:64px; }}
+[data-testid="stAudioInput"] button {{ transform:scale(1.6); color:{t['mic']} !important; }}
+[data-testid="stAudioInput"] button svg, [data-testid="stAudioInput"] button * {{ fill:{t['mic']} !important; color:{t['mic']} !important; }}
+@keyframes ep-mic {{ 0%,100% {{ box-shadow:0 0 0 0 {t['mic']}88; }} 60% {{ box-shadow:0 0 0 12px {t['mic']}00, 0 0 26px {t['mic']}66; }} }}
 @media (prefers-reduced-motion: reduce) {{ .stButton button, [data-testid="stAudioInput"] {{ animation:none !important; }} }}
-button[data-variant][aria-checked="true"], button[data-variant][data-selected="true"],
-.stButton button[kind="primary"], [data-testid="stFormSubmitButton"] button {{
-  background:linear-gradient(135deg, {t['accent2']}, {t['accent']}) !important; color:{t['accent_ink']} !important;
-  border:none !important; box-shadow:0 6px 20px rgba(0,0,0,.35); }}
-button[data-variant][aria-checked="true"] p, button[data-variant][data-selected="true"] p,
-.stButton button[kind="primary"] p, [data-testid="stFormSubmitButton"] button p {{ color:{t['accent_ink']} !important; }}
-[data-testid="stTab"] p {{ color:{t['muted']} !important; }}
-[data-testid="stTab"][aria-selected="true"] p {{ color:{t['accent2']} !important; }}
 [data-testid="stExpander"], [data-testid="stVerticalBlockBorderWrapper"] {{ background:rgba(255,255,255,.05) !important; border-color:{t['edge']} !important; }}
 [data-testid="stBottom"] {{ background:linear-gradient(180deg, rgba(0,0,0,0), rgba(5,7,15,.85) 40%) !important; }}
 .summary {{ background:rgba(255,255,255,.06) !important; border-color:{t['edge']} !important; }}
 .bubble, .tip, .tip *, .msg .bubble * {{ color:#21414A !important; }}
 hr {{ border-color:{t['edge']} !important; }}
-[data-testid="stLinkButton"] a, [data-testid="stDownloadButton"] button {{ background:rgba(255,255,255,.10) !important;
-  color:{t['text']} !important; border:1px solid {t['edge']} !important; }}
-[data-testid="stLinkButton"] a p, [data-testid="stLinkButton"] a span, [data-testid="stDownloadButton"] button p {{ color:{t['text']} !important; }}
 .vid-title {{ color:{t['text']}; }}
 /* celular e tablet */
 @media (max-width: 640px) {{ .block-container {{ padding:1rem .85rem 1.6rem !important; border-radius:20px; margin-top:6px; }}
@@ -279,6 +312,50 @@ export default function () {
 """
 _parallax = st.components.v2.component("english_parallax", js=_PARALLAX_JS)
 
+# Sons de toque (modo infantil): tudo sintetizado com Web Audio, sem baixar arquivos.
+_CLICK_JS = """
+export default function (component) {
+  const on = !!(component.data && component.data.on);
+  window.__epSfxOn = on;
+  if (window.__epSfx) return;
+  window.__epSfx = true;
+  let ctx = null;
+  const tone = (f1, f2, dur, type = 'sine', vol = .16, delay = 0) => {
+    try {
+      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
+      if (ctx.state === 'suspended') ctx.resume();
+      const t = ctx.currentTime + delay, o = ctx.createOscillator(), g = ctx.createGain();
+      o.type = type; o.frequency.setValueAtTime(f1, t); o.frequency.exponentialRampToValueAtTime(f2, t + dur);
+      g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + .012);
+      g.gain.exponentialRampToValueAtTime(.0001, t + dur);
+      o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + dur + .02);
+    } catch (e) {}
+  };
+  const SOUNDS = {
+    tap:    () => tone(660, 990, .09, 'triangle'),
+    go:     () => { tone(523, 784, .12, 'triangle'); tone(784, 1175, .16, 'triangle', .14, .1); },
+    pick:   () => tone(880, 1320, .07, 'square', .07),
+    tab:    () => { tone(392, 587, .1, 'sine'); tone(587, 880, .12, 'sine', .12, .07); },
+    open:   () => tone(300, 1200, .22, 'sawtooth', .06),
+    back:   () => tone(700, 350, .14, 'triangle'),
+  };
+  document.addEventListener('pointerdown', (ev) => {
+    if (!window.__epSfxOn) return;
+    const el = ev.target.closest('button, [role="tab"], a[data-testid], [data-testid="stLinkButton"] a');
+    if (!el || el.disabled) return;
+    const txt = (el.innerText || '').trim();
+    let k = 'tap';
+    if (el.getAttribute('role') === 'tab') k = 'tab';
+    else if (el.closest('[data-testid="stPopover"]')) k = 'open';
+    else if (el.hasAttribute('data-variant')) k = 'pick';
+    else if (el.getAttribute('kind') === 'primary' || el.closest('[data-testid="stFormSubmitButton"]')) k = 'go';
+    else if (/^(🛰️|⬅|◀)|Voltar/.test(txt)) k = 'back';
+    SOUNDS[k]();
+  }, true);
+}
+"""
+_clicks = st.components.v2.component("english_click_sounds", js=_CLICK_JS)
+
 
 def apply_theme(name: str) -> None:
     """name: 'classic' (visual claro de antes), 'london' ou 'space'."""
@@ -286,6 +363,7 @@ def apply_theme(name: str) -> None:
         return
     st.markdown(theme_css(name), unsafe_allow_html=True)
     _parallax(key="parallax")
+    _clicks(key="click_sounds", data={"on": name == "space"})
 
 
 # --- Cartões com foto (cenários do tema Londres) ---------------------------------------------

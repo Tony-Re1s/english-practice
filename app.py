@@ -458,7 +458,7 @@ def settings_view() -> None:
         if db.enabled():
             db.set_pref(email, "tema", pick)
         st.rerun()
-    st.caption("No nível Criança o app vira sempre o tema Espaço.")
+    st.caption("No nível Infantil o app vira sempre o tema Espaço.")
     if KIDS_PROFILE or LEVELS.get(ss.level, {}).get("kids") or ss.get("astro"):
         with st.expander("👩‍🚀 Meu astronauta (nome e nave)"):
             astro_form("astro_settings", "Mude o nome ou a nave quando quiser:")
@@ -1162,9 +1162,18 @@ def videos_tab(lvl: str) -> None:
 
 
 def translator_tab() -> None:
-    text = st.text_input("O que você quer traduzir?", key="tr_text", placeholder="ex.: 'cash flow' ou 'fazer hora extra'")
-    rec = st.audio_input("…ou fale", key=f"tr_mic_{st.session_state.get('tr_mic', 0)}") if voice.can_listen() else None
-    go = st.button("🔤 Traduzir", type="primary", width="stretch")
+    kids = bool(LEVELS.get(ss.level, {}).get("kids"))
+    if kids:
+        text = st.text_input("Qual palavra você quer saber em inglês? ✍️", key="tr_text",
+                             placeholder="ex.: cachorro, arco-íris, eu gosto de pizza")
+        st.markdown('<div style="font-weight:800;font-size:1.1rem;margin:6px 0 4px">🎤 Ou toque no microfone e fale</div>',
+                    unsafe_allow_html=True)
+        rec = st.audio_input("Fale", key=f"tr_mic_{st.session_state.get('tr_mic', 0)}",
+                             label_visibility="collapsed") if voice.can_listen() else None
+    else:
+        text = st.text_input("O que você quer traduzir?", key="tr_text", placeholder="ex.: 'cash flow' ou 'fazer hora extra'")
+        rec = st.audio_input("…ou fale", key=f"tr_mic_{st.session_state.get('tr_mic', 0)}") if voice.can_listen() else None
+    go = st.button("🔤 Como se diz?" if kids else "🔤 Traduzir", type="primary", width="stretch")
     if rec is not None:
         try:
             with st.spinner("Ouvindo..."):

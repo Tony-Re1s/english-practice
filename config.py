@@ -29,7 +29,7 @@ OPENAI_TTS_VOICE = "nova"
 # pace = ritmo padrão da voz (o botão "voz devagar" sempre usa "slow")
 LEVELS = {
     "crianca": {
-        "label": "🧒 Criança (7-8 anos)", "cefr": "Pre-A1 (kids)", "pace": "slow", "kids": True,
+        "label": "🚀 Infantil", "cefr": "Pre-A1 (kids)", "pace": "slow", "kids": True,
         "guide": "You are talking with a 7-8 year old child who is starting to learn English. Use only very common, "
                  "concrete words (animals, colors, food, toys, school, family). Max 10 words per reply, very short "
                  "sentences, present tense. Be playful, warm and encouraging (\"Great job!\", \"Wow!\"). "

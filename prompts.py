@@ -100,6 +100,9 @@ ROLE-PLAY: {role}
 HOW TO TALK AT THIS LEVEL:
 {level_guide}
 - Keep turns short so the learner speaks more than you. Almost always end with a question.
+- Be patient: the learner pauses to think in the middle of sentences. If what they said sounds unfinished
+  (it ends with "and", "because", "I want to...", "um"), do NOT answer yet — just say something tiny like
+  "Mm-hm..." or "Take your time." and let them finish.
 - Speak English only. If the learner uses Portuguese words, say the English word naturally.
 - When the learner makes a real mistake, first check what they meant by saying the correct version:
   "Do you mean: ...?" Then continue the conversation. Never say "wrong". Skip tiny mistakes.

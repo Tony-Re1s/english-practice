@@ -108,11 +108,12 @@ async function start(S) {
   S.ctx = new Ctx(); await S.ctx.resume();
   S.playHead = 0; S.sources = [];
   S.versions = (S.d.versions || ['v1alpha', 'v1beta']).slice();
+  S.vad = true;   // pausa longa para quem está aprendendo (se a API recusar, conecta sem ela)
   connect(S);
 }
 
-function connect(S) {
-  const ver = S.versions.shift();
+function connect(S, again) {
+  const ver = again || S.versions.shift(); S.ver = ver;
   const url = 'wss://generativelanguage.googleapis.com/ws/google.ai.generativelanguage.' + ver +
               '.GenerativeService.BidiGenerateContentConstrained?access_token=' + encodeURIComponent(S.d.token);
   S.ready = false;
@@ -122,6 +123,12 @@ function connect(S) {
     generationConfig: { responseModalities: ['AUDIO'] },
     systemInstruction: { parts: [{ text: S.d.system }] },
     inputAudioTranscription: {}, outputAudioTranscription: {},
+    ...(S.vad ? { realtimeInputConfig: { automaticActivityDetection: {
+      // quem está aprendendo pausa para pensar: só considera "terminou" depois de um silêncio longo
+      startOfSpeechSensitivity: 'START_SENSITIVITY_LOW',
+      endOfSpeechSensitivity: 'END_SENSITIVITY_LOW',
+      prefixPaddingMs: 300,
+      silenceDurationMs: S.d.silence_ms || 1800 } } } : {}),
   } }));
   ws.onmessage = async (ev) => {
     let msg; try { msg = JSON.parse(typeof ev.data === 'string' ? ev.data : await ev.data.text()); } catch (e) { return; }
@@ -139,7 +146,8 @@ function connect(S) {
   ws.onclose = (ev) => {
     const reason = (ev.reason || '') + ' (código ' + ev.code + ')';
     if (S.state === 'ended' || S.state === 'error') return;
-    if (!S.ready && S.versions.length) { connect(S); return; }   // tenta a outra versão da API
+    if (!S.ready && S.vad) { S.vad = false; connect(S, S.ver); return; }   // sem a pausa longa, mesma versão
+    if (!S.ready && S.versions.length) { S.vad = true; connect(S); return; }   // tenta a outra versão da API
     const quota = /quota|exhaust|resource|limit|429/i.test(ev.reason || '');
     finish(S, S.ready ? 'conexão encerrada' : 'erro', quota ? 'cota' : (S.ready ? '' : reason));
   };
@@ -217,13 +225,13 @@ _component = st.components.v2.component("english_live_call", css=CSS, js=JS)
 
 
 def live_call(token: str, system: str, used_seconds: float, max_seconds: float, session_max_seconds: float,
-              session_key: str, key: str = "live_call"):
+              session_key: str, key: str = "live_call", silence_ms: int = 1800):
     """Mostra a chamada ao vivo. Retorna {'seconds', 'transcript', 'reason', 'error'} quando ela termina."""
     result = _component(
         key=key,
         data={"token": token, "model": LIVE_MODEL, "system": system, "used_seconds": used_seconds,
               "max_seconds": max_seconds, "session_max_seconds": session_max_seconds,
-              "session_key": session_key, "versions": ["v1alpha", "v1beta"]},
+              "session_key": session_key, "versions": ["v1alpha", "v1beta"], "silence_ms": silence_ms},
         on_live_end_change=lambda: None,
     )
     return getattr(result, "live_end", None)

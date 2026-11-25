@@ -1182,7 +1182,8 @@ if ss.mode == "aovivo" and not ss.summary:
     ok, why, used = live_status()
     res = live.live_call(ss.live_token or "", ss.system, used_seconds=used,
                          max_seconds=prof.live_daily_minutes * 60,
-                         session_max_seconds=LIVE_MAX_SESSION_MIN * 60, session_key=ss.live_session_key)
+                         session_max_seconds=LIVE_MAX_SESSION_MIN * 60, session_key=ss.live_session_key,
+                         silence_ms=2400 if LEVELS[ss.level].get("kids") else 1800)
     st.caption("Dica: use fone de ouvido. A transcrição e o resumo aparecem quando a chamada terminar.")
     if st.button("↩️ Voltar sem ligar", width="stretch",
                  help="Use só se a chamada ainda não começou. Para encerrar uma chamada em andamento, toque no botão dela."):

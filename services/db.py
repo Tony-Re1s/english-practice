@@ -46,6 +46,9 @@ SCHEMA = [
     "alter table ep_videos add column if not exists series text",
     """create table if not exists ep_prefs (
         user_email text, key text, value text, primary key (user_email, key))""",
+    """create table if not exists ep_friends (
+        from_email text, to_email text, status text default 'pending', ts timestamptz default now(),
+        primary key (from_email, to_email))""",
 ]
 
 _lock = threading.Lock()
@@ -62,7 +65,8 @@ def _url() -> str:
                 return str(sec.get("DATABASE_URL"))
     except Exception:
         pass
-    return ""
+    import os
+    return os.environ.get("DATABASE_URL", "")   # scripts fora do app (ex.: envio do resumo semanal)
 
 
 def enabled() -> bool:
@@ -342,6 +346,45 @@ def get_pref(user_email: str, key: str) -> str | None:
 def set_pref(user_email: str, key: str, value: str) -> None:
     _run("""insert into ep_prefs (user_email, key, value) values (%s,%s,%s)
             on conflict (user_email, key) do update set value = excluded.value""", (user_email, key, value))
+
+
+# --- amigos da Corrida Espacial ---
+def friend_request(frm: str, to: str) -> None:
+    """Convite de amizade. Se o outro já tinha convidado, vira amizade na hora."""
+    back = _run("select status from ep_friends where from_email = %s and to_email = %s", (to, frm), fetch=True)
+    if back:
+        _run("update ep_friends set status = 'ok' where from_email = %s and to_email = %s", (to, frm))
+        return
+    _run("""insert into ep_friends (from_email, to_email) values (%s, %s)
+            on conflict (from_email, to_email) do update set status = 'pending', ts = now()""", (frm, to))
+
+
+def friend_answer(frm: str, to: str, accept: bool) -> None:
+    if accept:
+        _run("update ep_friends set status = 'ok' where from_email = %s and to_email = %s", (frm, to))
+    else:
+        _run("delete from ep_friends where from_email = %s and to_email = %s", (frm, to))
+
+
+def friend_remove(a: str, b: str) -> None:
+    _run("delete from ep_friends where (from_email = %s and to_email = %s) or (from_email = %s and to_email = %s)",
+         (a, b, b, a))
+
+
+def friends(user: str) -> dict:
+    """{'ok': {amigos}, 'in': {quem me convidou}, 'out': {quem eu convidei}}."""
+    rows = _run("select from_email, to_email, status from ep_friends where from_email = %s or to_email = %s",
+                (user, user), fetch=True)
+    out = {"ok": set(), "in": set(), "out": set()}
+    for r in rows:
+        other = r["to_email"] if r["from_email"] == user else r["from_email"]
+        if r["status"] == "ok":
+            out["ok"].add(other)
+        elif r["to_email"] == user:
+            out["in"].add(other)
+        else:
+            out["out"].add(other)
+    return out
 
 
 def pref_all(key: str) -> dict:

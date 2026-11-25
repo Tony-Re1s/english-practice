@@ -1,0 +1,25 @@
+name: Resumo semanal para as famílias
+
+on:
+  schedule:
+    - cron: "41 10 * * 1"   # toda segunda, 07:41 no horário de Brasília (10:41 UTC)
+  workflow_dispatch:         # botão "Run workflow" para mandar na hora
+
+jobs:
+  enviar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Instalar dependências
+        run: pip install -r requirements.txt
+      - name: Enviar resumos
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASSWORD: ${{ secrets.SMTP_PASSWORD }}
+        run: python scripts/weekly_report.py

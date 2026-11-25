@@ -87,6 +87,7 @@ CSS = """
 JS = r"""
 const IMG = 'app/static/theme/';
 function sfx(kind) {
+  if (window.__epFx === false) return;
   // efeitos sonoros gerados na hora (Web Audio): nada para baixar
   try {
     const C = window.__gxCtx || (window.__gxCtx = new (window.AudioContext || window.webkitAudioContext)());

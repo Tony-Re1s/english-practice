@@ -276,9 +276,19 @@ button[data-variant][aria-checked="true"] *, button[data-variant][data-selected=
 {t.get('extra_css', '')}
 /* microfone em destaque */
 [data-testid="stAudioInput"] {{ border:3px solid {t['mic']} !important; border-radius:22px !important;
-  background:rgba(255,255,255,.10) !important; animation: ep-mic 1.8s ease-in-out infinite; padding:8px 6px; min-height:64px; }}
-[data-testid="stAudioInput"] button {{ transform:scale(1.6); color:{t['mic']} !important; }}
-[data-testid="stAudioInput"] button svg, [data-testid="stAudioInput"] button * {{ fill:{t['mic']} !important; color:{t['mic']} !important; }}
+  background:rgba(255,255,255,.08) !important; animation: ep-mic 1.8s ease-in-out infinite; padding:8px; }}
+[data-testid="stAudioInput"] > div:last-child {{ background:rgba(8,12,34,.55) !important; border:none !important;
+  border-radius:18px !important; min-height:76px; align-items:center; }}
+[data-testid="stAudioInputActionButton"] {{ width:62px !important; min-width:62px !important; max-width:62px !important;
+  height:62px !important; min-height:62px !important; flex:0 0 62px !important; padding:0 !important; aspect-ratio:1/1;
+  border-radius:50% !important; background:{t['mic']} !important; box-shadow:0 4px 0 rgba(0,0,0,.45), 0 0 18px {t['mic']}88 !important;
+  display:flex !important; align-items:center; justify-content:center; transition:transform .12s ease; }}
+[data-testid="stAudioInputActionButton"]:active {{ transform:translateY(3px) scale(.95); }}
+[data-testid="stAudioInputActionButton"] svg {{ width:34px !important; height:34px !important; color:#14102A !important; }}
+[data-testid="stAudioInputActionButton"] svg path {{ fill:#14102A !important; }}
+[data-testid="stAudioInputActionButton"] svg g, [data-testid="stAudioInputActionButton"] svg rect {{ fill:none !important; }}
+[data-testid="stAudioInputWaveformTimeCode"] {{ color:#EAF2FF !important; font-weight:800; background:transparent !important; }}
+[data-testid="stAudioInputWaveSurfer"] * {{ opacity:.9; }}
 @keyframes ep-mic {{ 0%,100% {{ box-shadow:0 0 0 0 {t['mic']}88; }} 60% {{ box-shadow:0 0 0 12px {t['mic']}00, 0 0 26px {t['mic']}66; }} }}
 @media (prefers-reduced-motion: reduce) {{ .stButton button, [data-testid="stAudioInput"] {{ animation:none !important; }} }}
 [data-testid="stExpander"], [data-testid="stVerticalBlockBorderWrapper"] {{ background:rgba(255,255,255,.05) !important; border-color:{t['edge']} !important; }}
@@ -320,20 +330,98 @@ _parallax = st.components.v2.component("english_parallax", js=_PARALLAX_JS)
 # Sons de toque (modo infantil): tudo sintetizado com Web Audio, sem baixar arquivos.
 _CLICK_JS = """
 export default function (component) {
-  const on = !!(component.data && component.data.on);
-  window.__epSfxOn = on;
+  const { data, setTriggerValue } = component;
+  const cfg = data || {};
+  window.__epSfxOn = !!cfg.on && cfg.taps !== false && !cfg.muted;
+  window.__epFx = !!cfg.on && cfg.fx !== false && !cfg.muted;
+  window.__epMusicWanted = !!cfg.on && cfg.music !== false && !cfg.muted;
+  window.__epMusicVol = Math.max(0, Math.min(1, (cfg.vol ?? 40) / 100));
+  const A = window.AudioContext || window.webkitAudioContext;
+  const ctx = () => { if (!window.__epCtx) window.__epCtx = new A(); if (window.__epCtx.state === 'suspended') window.__epCtx.resume(); return window.__epCtx; };
+
+  // ---- trilha de fundo: acordes suaves + estrelinhas (tudo sintetizado, em loop) ----
+  const music = window.__epMusic || (window.__epMusic = { on: false });
+  const CHORDS = [[261.6, 329.6, 392, 493.9], [220, 261.6, 329.6, 392], [174.6, 220, 261.6, 329.6], [196, 246.9, 293.7, 392]];
+  const PENTA = [523.3, 587.3, 659.3, 784, 880, 1046.5];
+  const startMusic = () => {
+    if (music.on) return;
+    const c = ctx(); music.on = true;
+    music.master = c.createGain(); music.master.gain.value = 0.0001;
+    const lp = c.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = 1400;
+    music.master.connect(lp); lp.connect(c.destination);
+    music.master.gain.exponentialRampToValueAtTime(0.05 * window.__epMusicVol + 0.0001, c.currentTime + 3);
+    let k = 0;
+    const chord = () => {
+      if (!music.on) return;
+      const t = c.currentTime;
+      CHORDS[k++ % CHORDS.length].forEach((f, i) => {
+        [f, f / 2].forEach((ff, j) => {
+          const o = c.createOscillator(), g = c.createGain(); o.type = j ? 'sine' : 'triangle'; o.frequency.value = ff;
+          o.detune.value = (i - 1.5) * 4;
+          g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(j ? 0.10 : 0.06, t + 2.2);
+          g.gain.exponentialRampToValueAtTime(0.0001, t + 8.6);
+          o.connect(g); g.connect(music.master); o.start(t); o.stop(t + 8.8);
+        });
+      });
+      for (let n = 0; n < 4; n++) {   // estrelinhas
+        const tt = t + 1 + Math.random() * 6, o = c.createOscillator(), g = c.createGain();
+        o.type = 'sine'; o.frequency.value = PENTA[Math.floor(Math.random() * PENTA.length)];
+        g.gain.setValueAtTime(0.0001, tt); g.gain.exponentialRampToValueAtTime(0.05, tt + .02);
+        g.gain.exponentialRampToValueAtTime(0.0001, tt + 1.6);
+        o.connect(g); g.connect(music.master); o.start(tt); o.stop(tt + 1.7);
+      }
+      music.timer = setTimeout(chord, 8000);
+    };
+    chord();
+  };
+  const stopMusic = () => {
+    if (!music.on) return;
+    music.on = false; clearTimeout(music.timer);
+    try { const c = ctx(); music.master.gain.cancelScheduledValues(c.currentTime);
+      music.master.gain.setValueAtTime(music.master.gain.value, c.currentTime);
+      music.master.gain.exponentialRampToValueAtTime(0.0001, c.currentTime + 1.2); } catch (e) {}
+  };
+  window.__epApplyMusic = () => {
+    if (window.__epMusicWanted && window.__epGesture) {
+      startMusic();
+      try { music.master.gain.setTargetAtTime(0.05 * window.__epMusicVol + 0.0001, ctx().currentTime, .5); } catch (e) {}
+    } else stopMusic();
+  };
+  window.__epApplyMusic();
+
+  // ---- botão flutuante 🔊 / 🔇 ----
+  let fab = document.getElementById('ep-sound-fab');
+  if (cfg.on) {
+    if (!fab) {
+      fab = document.createElement('button'); fab.id = 'ep-sound-fab';
+      fab.style.cssText = 'position:fixed;right:12px;top:12px;z-index:9999;width:46px;height:46px;border-radius:50%;'
+        + 'border:2px solid #5FE3FF;background:#1C2A66;color:#fff;font-size:22px;box-shadow:0 4px 0 rgba(0,0,0,.45);cursor:pointer';
+      fab.addEventListener('click', (ev) => { ev.stopPropagation(); window.__epSetMute(!window.__epMuted); });
+      document.body.appendChild(fab);
+    }
+    fab.style.display = '';
+  } else if (fab) fab.style.display = 'none';
+  window.__epMuted = !!cfg.muted;
+  if (fab) fab.textContent = window.__epMuted ? '🔇' : '🔊';
+  window.__epSetMute = (m) => {
+    window.__epMuted = m;
+    window.__epSfxOn = !m && cfg.taps !== false; window.__epFx = !m && cfg.fx !== false;
+    window.__epMusicWanted = !m && cfg.music !== false;
+    if (fab) fab.textContent = m ? '🔇' : '🔊';
+    window.__epApplyMusic();
+    setTriggerValue('mute', m ? 'on' : 'off');
+  };
+
   if (window.__epSfx) return;
   window.__epSfx = true;
-  let ctx = null;
   const tone = (f1, f2, dur, type = 'sine', vol = .16, delay = 0) => {
     try {
-      ctx = ctx || new (window.AudioContext || window.webkitAudioContext)();
-      if (ctx.state === 'suspended') ctx.resume();
-      const t = ctx.currentTime + delay, o = ctx.createOscillator(), g = ctx.createGain();
+      const c = ctx();
+      const t = c.currentTime + delay, o = c.createOscillator(), g = c.createGain();
       o.type = type; o.frequency.setValueAtTime(f1, t); o.frequency.exponentialRampToValueAtTime(f2, t + dur);
       g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(vol, t + .012);
       g.gain.exponentialRampToValueAtTime(.0001, t + dur);
-      o.connect(g); g.connect(ctx.destination); o.start(t); o.stop(t + dur + .02);
+      o.connect(g); g.connect(c.destination); o.start(t); o.stop(t + dur + .02);
     } catch (e) {}
   };
   const SOUNDS = {
@@ -345,9 +433,10 @@ export default function (component) {
     back:   () => tone(700, 350, .14, 'triangle'),
   };
   document.addEventListener('pointerdown', (ev) => {
+    if (!window.__epGesture) { window.__epGesture = true; window.__epApplyMusic && window.__epApplyMusic(); }
     if (!window.__epSfxOn) return;
     const el = ev.target.closest('button, [role="tab"], a[data-testid], [data-testid="stLinkButton"] a');
-    if (!el || el.disabled) return;
+    if (!el || el.disabled || el.id === 'ep-sound-fab') return;
     const txt = (el.innerText || '').trim();
     let k = 'tap';
     if (el.getAttribute('role') === 'tab') k = 'tab';
@@ -362,13 +451,15 @@ export default function (component) {
 _clicks = st.components.v2.component("english_click_sounds", js=_CLICK_JS)
 
 
-def apply_theme(name: str) -> None:
-    """name: 'classic' (visual claro de antes), 'london' ou 'space'."""
+def apply_theme(name: str, sound: dict | None = None):
+    """name: 'classic' (visual claro de antes), 'london' ou 'space'. sound = preferências de som (música, toques...).
+    Retorna 'on'/'off' quando a pessoa toca no botão 🔊/🔇 (para salvar)."""
     if name not in THEMES:
         return
     st.markdown(theme_css(name), unsafe_allow_html=True)
     _parallax(key="parallax")
-    _clicks(key="click_sounds", data={"on": name == "space"})
+    res = _clicks(key="click_sounds", data={"on": name == "space", **(sound or {})}, on_mute_change=lambda: None)
+    return getattr(res, "mute", None)
 
 
 # --- Cartões com foto (cenários do tema Londres) ---------------------------------------------
@@ -424,6 +515,9 @@ _TILES_CSS = """
 .kt.many .kt-c { padding:6px 2px 8px; }
 .kt.many .kt-c span { font-size:clamp(10.5px, 2.85vw, 17px); letter-spacing:-.01em; }
 .kt-c span { overflow-wrap:normal; word-break:keep-all; hyphens:none; }
+.kt-emo { flex:1; min-height:0; display:flex; align-items:center; justify-content:center;
+  font-size:clamp(34px, 11vw, 58px); filter:drop-shadow(0 6px 10px rgba(0,0,0,.5)); transition: transform .3s cubic-bezier(.2,.8,.2,1); }
+.kt-c.on .kt-emo { transform:scale(1.1) rotate(-6deg); }
 .kt-c.on { background:linear-gradient(180deg, #FFE066, #FFB020); border-color:#FFF3B0; box-shadow:0 5px 0 #A86A00, 0 0 22px rgba(255,208,64,.55); }
 .kt-c.on span { color:#2A1600; text-shadow:none; }
 .kt-c.on img { transform:scale(1.08) rotate(-4deg); }
@@ -440,14 +534,14 @@ _TILES_JS = """
 export default function (component) {
   const { data, setTriggerValue, parentElement } = component;
   const old = parentElement.querySelector('.kt'); if (old) old.remove();
-  const box = document.createElement('div'); box.className = 'kt' + (data.small ? ' sm' : '') + ((data.items || []).length >= 5 ? ' many' : '');
-  box.style.setProperty('--n', (data.items || []).length);
+  const box = document.createElement('div'); box.className = 'kt' + (data.small ? ' sm' : '') + ((data.cols || (data.items || []).length) >= 5 ? ' many' : '');
+  box.style.setProperty('--n', data.cols || (data.items || []).length);
   (data.items || []).forEach((it) => {
     const c = document.createElement('div');
     c.className = 'kt-c' + (it.key === data.selected ? ' on' : '') + (it.lock ? ' lock' : '');
-    c.innerHTML = `<img src="${it.img}" alt=""><span>${it.label}</span>`;
+    c.innerHTML = (it.img ? `<img src="${it.img}" alt="">` : `<div class="kt-emo">${it.emoji || '⭐'}</div>`) + `<span>${it.label}</span>`;
     c.addEventListener('click', () => {
-      try { const A = window.AudioContext || window.webkitAudioContext; const x = window.__epTileCtx || (window.__epTileCtx = new A());
+      if (window.__epSfxOn !== false) try { const A = window.AudioContext || window.webkitAudioContext; const x = window.__epTileCtx || (window.__epTileCtx = new A());
         const o = x.createOscillator(), g = x.createGain(), t = x.currentTime; o.type = 'triangle';
         o.frequency.setValueAtTime(520, t); o.frequency.exponentialRampToValueAtTime(1040, t + .12);
         g.gain.setValueAtTime(.15, t); g.gain.exponentialRampToValueAtTime(.0001, t + .16); o.connect(g); g.connect(x.destination);
@@ -462,9 +556,10 @@ export default function (component) {
 _tiles = st.components.v2.component("english_kid_tiles", css=_TILES_CSS, js=_TILES_JS)
 
 
-def kid_tiles(items: list[dict], selected: str, key: str, small: bool = False):
-    """items: [{'key','label','img', 'lock'?}]. Cartões ilustrados lado a lado; retorna a chave tocada (ou None)."""
-    res = _tiles(key=key, data={"items": items, "selected": selected, "small": small}, on_pick_change=lambda: None)
+def kid_tiles(items: list[dict], selected: str, key: str, small: bool = False, cols: int | None = None):
+    """items: [{'key','label','img' ou 'emoji', 'lock'?}]. Cartões ilustrados; cols = quantos por linha. Retorna a chave tocada."""
+    res = _tiles(key=key, data={"items": items, "selected": selected, "small": small, "cols": cols},
+                 on_pick_change=lambda: None)
     return getattr(res, "pick", None)
 
 

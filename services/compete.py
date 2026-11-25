@@ -29,8 +29,8 @@ def profile(email: str, astros: dict) -> tuple[str, str]:
     return name, avatar
 
 
-def board() -> list[dict]:
-    """Placar da semana, do 1º ao último."""
+def board(only: set | None = None) -> list[dict]:
+    """Placar da semana, do 1º ao último. only = só estas pessoas (eu + amigos)."""
     act = db.week_activity()
     pts: dict[str, dict] = {}
     for e in act["exercises"]:
@@ -47,6 +47,10 @@ def board() -> list[dict]:
     kids |= {e["user_email"] for e in act["exercises"] if e["level"] == "crianca"} - adult_like
     for u in kids:
         pts.setdefault(u, {"stars": 0, "turns": 0, "videos": 0})
+    if only is not None:
+        for u in only:
+            pts.setdefault(u, {"stars": 0, "turns": 0, "videos": 0})
+        pts = {u: p for u, p in pts.items() if u in only}
     out = []
     for u, p in pts.items():
         name, avatar = profile(u, astros)
@@ -79,10 +83,12 @@ def save_score(email: str, score: int) -> dict:
     return {**d, "new_record": rec}
 
 
-def challenge_board() -> list[dict]:
+def challenge_board(only: set | None = None) -> list[dict]:
     astros = db.pref_all("astronauta")
     out = []
     for u, raw in db.pref_all("desafio").items():
+        if only is not None and u not in only:
+            continue
         try:
             d = json.loads(raw)
         except Exception:

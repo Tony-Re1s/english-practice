@@ -14,7 +14,7 @@ from config import (DEFAULT_LEVEL, LEVELS, LIVE_MAX_SESSION_MIN, LIVE_MODEL, LIV
                     MAX_HISTORY_TURNS, PROVIDER_LABEL, PROVIDERS)
 from prompts import (FREE_TALK_OPEN, FREE_TALK_ROLE, LIVE_SYSTEM, SCENARIOS, START_MESSAGE, TOPIC_ROLE,
                      TUTOR_SYSTEM)
-from services import album, compete, galaxy, nav, rewards, space, db, learn, live, llm, users, voice
+from services import album, compete, family, galaxy, nav, notify, report, rewards, space, db, learn, live, llm, users, voice
 from syllabus import topic_for
 from services.voice_chat import voice_chat
 
@@ -41,10 +41,63 @@ if email is None:
     st.markdown('<div class="lg-foot">Acesso só para contas liberadas pelo administrador.</div>', unsafe_allow_html=True)
     st.stop()
 
+def family_signup() -> None:
+    """Primeiro acesso: o pai (ou mãe) cria a conta da família em 3 passos, com explicação em cada um."""
+    ui.login_screen("Bem-vindo! 👋", "Vamos criar a conta da família. Leva 1 minuto.")
+    st.markdown(f"Você entrou como **{email}**. Esta conta vai ser **dos pais**; dentro dela a criança tem o "
+                "perfil dela, e vocês têm uma área protegida por PIN.")
+    with st.form("signup"):
+        st.markdown("#### 1️⃣ Quem vai usar")
+        parent = st.text_input("Seu nome", placeholder="ex.: Ana")
+        child = st.text_input("Nome da criança", placeholder="ex.: Matheus",
+                              help="É o nome que o robozinho Bip vai usar. Pode ser só o primeiro nome ou um apelido.")
+        st.markdown("#### 2️⃣ Seu PIN de pais")
+        st.caption("4 números para entrar na área dos pais (limites, relatórios, conversas). "
+                   "A criança não precisa saber. Evite 1234 ou 0000.")
+        c1, c2 = st.columns(2)
+        pin1 = c1.text_input("Crie o PIN", type="password", max_chars=4)
+        pin2 = c2.text_input("Repita o PIN", type="password", max_chars=4)
+        st.markdown("#### 3️⃣ Resumo da semana e autorização")
+        ch = st.multiselect("Como quer receber o resumo toda segunda?", ["E-mail", "Telegram"], default=["E-mail"],
+                            help="Telegram você conecta depois, na área dos pais (tem um passo a passo).")
+        mails = st.text_input("E-mails que recebem o resumo", value=email,
+                              help="Pode colocar mais de um, separado por vírgula (ex.: o seu e o da mãe).")
+        with st.expander("📄 Como o app usa os dados (leia antes de autorizar)"):
+            st.markdown(family.PRIVACY_TEXT)
+        ok = st.checkbox("Sou pai, mãe ou responsável, li como o app usa os dados e autorizo a criança a usar.")
+        go = st.form_submit_button("🚀 Criar conta da família", type="primary", width="stretch")
+    if go:
+        errs = []
+        if not parent.strip() or not child.strip():
+            errs.append("preencha os dois nomes")
+        if pin1 != pin2:
+            errs.append("os dois PINs estão diferentes")
+        elif not family.valid_pin(pin1):
+            errs.append("o PIN precisa ter 4 números (e não pode ser 1234, 0000 ou 1111)")
+        if not ok:
+            errs.append("marque a autorização")
+        if errs:
+            st.error("Quase lá: " + "; ".join(errs) + ".")
+        else:
+            chans = [{"E-mail": "email", "Telegram": "telegram"}[c] for c in ch]
+            if family.create(email, parent.strip(), child.strip(), pin1, chans, mails):
+                st.rerun()
+            st.success("Conta criada! ✅ Agora é só aguardar a liberação do administrador.")
+    st.button("Entrar com outra conta", on_click=st.logout, key="login_btn")
+    st.stop()
+
+
 prof = users.load_profile(email)
 if not prof.allowed:
-    ui.login_screen("Acesso restrito", f"A conta {email} ainda não foi liberada. Peça ao administrador para "
-                    "liberar seu e-mail.", restricted=True)
+    row = db.get_user(email) if db.enabled() else None
+    if db.enabled() and not row:
+        family_signup()
+    elif row and family.is_family(email):
+        ui.login_screen("Quase pronto! ⏳", "A conta da família foi criada e está aguardando a liberação do "
+                        "administrador. Assim que for liberada, é só abrir o app de novo.", restricted=True)
+    else:
+        ui.login_screen("Acesso restrito", f"A conta {email} ainda não foi liberada. Peça ao administrador para "
+                        "liberar seu e-mail.", restricted=True)
     st.button("Entrar com outra conta", on_click=st.logout, width="stretch", key="login_btn")
     st.stop()
 
@@ -93,7 +146,27 @@ def _set_level(widget_key: str) -> None:
         ss.kid_inside = None
 
 
-ui.apply_theme(current_theme())
+def sound_cfg() -> dict:
+    """Preferências de som da conta: música de fundo, toques, festa, volume e o mudo rápido (🔇)."""
+    if "sound" not in ss:
+        try:
+            ss.sound = json.loads((db.get_pref(email, "sons") if db.enabled() else None) or "{}")
+        except Exception:
+            ss.sound = {}
+        for k, v in {"music": True, "taps": True, "fx": True, "vol": 40, "muted": False}.items():
+            ss.sound.setdefault(k, v)
+    return ss.sound
+
+
+def save_sound() -> None:
+    if db.enabled():
+        db.set_pref(email, "sons", json.dumps(ss.sound))
+
+
+_mute = ui.apply_theme(current_theme(), sound_cfg())
+if _mute in ("on", "off") and (_mute == "on") != ss.sound["muted"]:
+    ss.sound["muted"] = _mute == "on"
+    save_sound()
 voice.set_kid_voice(bool(LEVELS.get(ss.level, {}).get("kids")))   # modo Criança: voz infantil de robozinho
 if prof.level_locked:
     ss.level = prof.level
@@ -306,13 +379,28 @@ def handle_live_end(res: dict) -> None:
 
 
 # --- Navegação (barra de baixo + menu lateral ☰) -----------------------------------------
+# Conta da família: abre no Perfil Criança; o Perfil Pais pede o PIN.
+FAMILY = (not prof.is_admin) and db.enabled() and family.is_family(email)
+if FAMILY:
+    ss.setdefault("fam_mode", "kid")
+    if ss.fam_mode == "kid":
+        prof.level, prof.level_locked = "crianca", True
+        ss.level = "crianca"
+    elif LEVELS.get(ss.level, {}).get("kids"):
+        ss.level = DEFAULT_LEVEL     # na área dos pais, o app volta ao inglês de adulto
 KIDS_PROFILE = (not prof.is_admin) and bool(LEVELS.get(prof.level or "", {}).get("kids"))
 NAV_ITEMS = [("inicio", "💬", "Falar"), ("aprender", "📚", "Aprender"), ("historico", "📊", "Histórico"),
-             ("ajustes", "⚙️", "Ajustes"), ("usuarios", "👥", "Usuários")]
+             ("pais", "👨‍👩‍👧", "Pais"), ("ajustes", "⚙️", "Ajustes"), ("usuarios", "👥", "Usuários")]
 if KIDS_PROFILE:
-    NAV_ITEMS = [n for n in NAV_ITEMS if n[0] in ("inicio", "aprender", "ajustes")]
-elif not prof.is_admin:
+    NAV_ITEMS = [n for n in NAV_ITEMS if n[0] in ("inicio", "aprender", "ajustes") or (FAMILY and n[0] == "pais")]
+    if FAMILY:
+        NAV_ITEMS = [(k, "🔒" if k == "pais" else i, t) for k, i, t in NAV_ITEMS]
+elif FAMILY:
     NAV_ITEMS = [n for n in NAV_ITEMS if n[0] != "usuarios"]
+else:
+    NAV_ITEMS = [n for n in NAV_ITEMS if n[0] not in ("usuarios", "pais") or prof.is_admin]
+    if prof.is_admin:
+        NAV_ITEMS = [n for n in NAV_ITEMS if n[0] != "pais"]
 NAV = {k: f"{i} {t}" for k, i, t in NAV_ITEMS}
 
 
@@ -331,65 +419,6 @@ def bottom_nav(bar: bool = True) -> None:
 
 
 # --- Tela: histórico -------------------------------------------------------------
-def learned_words(who: str, lvl: str = "crianca", days: int | None = None) -> tuple[list[str], list[str]]:
-    """(palavras que já acerta, palavras para treinar), a partir das respostas das missões."""
-    import datetime as _dt
-    status: dict[str, bool] = {}
-    since = (_dt.datetime.now(_dt.timezone.utc) - _dt.timedelta(days=days)) if days else None
-    for a in (db.attempts(who, lvl) if db.enabled() else []):
-        if since and a["ts"] and a["ts"] < since:
-            continue
-        ex = a.get("content") or {}
-        ans = a.get("answers") or {}
-        if isinstance(ex, str):
-            ex = json.loads(ex)
-        if isinstance(ans, str):
-            ans = json.loads(ans)
-        for i, q in enumerate(ex.get("questions") or [], 1):
-            word = str(q.get("answer", "")).strip()
-            if not word or str(i) not in ans or len(word.split()) > 3:
-                continue
-            status[word.lower()] = learn.check_answer(q, ans[str(i)], lenient=True)   # vale a tentativa mais recente
-    know = sorted(w for w, ok in status.items() if ok)
-    review = sorted(w for w, ok in status.items() if not ok)
-    return know, review
-
-
-def family_report(who: str) -> str:
-    """Texto curto e animado sobre os últimos 7 dias, pronto para mandar para a família."""
-    r = db.week_report(who)
-    name = who.split("@")[0]
-    kid_ex = [e for e in r["exercises"] if LEVELS.get(e["level"], {}).get("kids")]
-    lines = [f"🌟 Semana de inglês — {name}", ""]
-    if kid_ex:
-        ok = [e for e in kid_ex if galaxy.passed(e["score"], e["total"])]
-        stars = sum(galaxy.stars_for(e["score"], e["total"]) for e in kid_ex)
-        lines.append(f"🚀 Planetas explorados: {len(ok)} ({stars} ⭐)")
-        for e in ok[-6:]:
-            info = space.stop(e["num"])
-            lines.append(f"   • {info['en']} — {topic_for(e['level'], e['num'])[0]}")
-        days = db.kid_days(who, kid_ex[0]["level"])
-        lines.append(f"🔥 Sequência: {rewards.streak(days)} dia(s) seguidos")
-        know, review = learned_words(who, kid_ex[0]["level"], days=7)
-        if know:
-            lines.append(f"✅ Palavras que acertou: {', '.join(know[:15])}")
-        if review:
-            lines.append(f"🔁 Para treinar: {', '.join(review[:10])}")
-        mins = kid_minutes_today(who)
-        if mins:
-            lines.append(f"⏳ Tempo no app hoje: {mins} min")
-    other = [e for e in r["exercises"] if not LEVELS.get(e["level"], {}).get("kids")]
-    if other:
-        lines.append(f"📝 Exercícios feitos: {len(other)}")
-    lines.append(f"💬 Conversas: {r['talks']} ({r['talk_turns']} falas em inglês)")
-    lines.append(f"🎬 Vídeos com perguntas: {r['videos']}")
-    if not r["exercises"] and not r["talks"] and not r["videos"]:
-        lines.append("Ainda não teve atividade nesta semana — que tal uma missão hoje? 🚀")
-    else:
-        lines += ["", "Parabéns pelo esforço! 👏 Continue assim!"]
-    return "\n".join(lines)
-
-
 def history_view() -> None:
     ui.hero("📊 Histórico e uso", "Quais IAs foram usadas, quanto custou (estimado) e suas conversas anteriores.")
     if not db.enabled():
@@ -401,13 +430,15 @@ def history_view() -> None:
     if prof.is_admin:
         people = sorted(set(db.known_users()) | {email})
         who = st.selectbox("Pessoa", people, index=people.index(email))
-    with st.expander("🏁 Corrida Espacial da semana (todo mundo)", expanded=False):
+    with st.expander("🏁 Corrida Espacial da semana" + (" (todo mundo)" if prof.is_admin else " (você e amigos)"),
+                     expanded=False):
         st.caption(f"Cada um corre até a própria meta (criança {compete.GOAL_KID} pts, adulto {compete.GOAL_ADULT} pts). "
                    "⭐ estrela = 10 · 💬 fala = 2 · 🎬 vídeo = 15 · recomeça toda segunda")
-        st.markdown(race_track_html(compete.board()), unsafe_allow_html=True)
+        only = None if prof.is_admin else ({email} | db.friends(email)["ok"])
+        st.markdown(race_track_html(compete.board(only=only)), unsafe_allow_html=True)
         st.markdown("**⚡ Recordes do Desafio Relâmpago**")
-        st.markdown(race_board_html(compete.challenge_board(), "score", "pts"), unsafe_allow_html=True)
-    know, review = learned_words(who)
+        st.markdown(race_board_html(compete.challenge_board(only=only), "score", "pts"), unsafe_allow_html=True)
+    know, review = report.learned_words(who)
     if know or review:
         with st.expander(f"📚 O que aprendeu no Infantil ({len(know)} palavras)", expanded=False):
             st.markdown("**✅ Já acerta:** " + (", ".join(know) if know else "—"))
@@ -415,10 +446,14 @@ def history_view() -> None:
             st.caption("Conta a tentativa mais recente de cada palavra nas missões. As conversas dele ficam em "
                        "🗂️ Conversas anteriores, mais abaixo.")
     with st.expander("📨 Resumo da semana para a família", expanded=False):
-        txt = family_report(who)
+        txt = report.family_report(who)
         st.text_area("Resumo", txt, height=220, label_visibility="collapsed")
-        from urllib.parse import quote
-        st.link_button("📲 Enviar no WhatsApp", "https://wa.me/?text=" + quote(txt), width="stretch")
+        cfg = notify.load_cfg(db.get_pref, who)
+        st.caption("Canais escolhidos: " + (", ".join(cfg["channels"]) or "nenhum") +
+                   ". Vai sozinho toda segunda de manhã.")
+        if cfg["channels"] and st.button("📨 Enviar agora", key="hist_send"):
+            for line in notify.send_report(cfg, report.display_name(who), txt):
+                st.write(line)
     days = st.segmented_control("Período", [7, 30, 90], default=30, format_func=lambda d: f"{d} dias") or 30
     df = pd.DataFrame(db.usage_by_provider(who, days))
     if df.empty:
@@ -526,6 +561,25 @@ def settings_view() -> None:
             db.set_pref("__app__", "kid_minutes", str(new_m))
             st.toast("Tempo atualizado ✅")
         st.caption("Conta só o tempo usando de verdade. Quando acaba, o Bip se despede e o app só volta no dia seguinte.")
+    if current_theme() == "space":
+        with st.expander("🔊 Sons e música", expanded=KIDS_PROFILE):
+            snd = sound_cfg()
+            changed = False
+            for k, lab in (("music", "🎵 Música de fundo"), ("taps", "👆 Som quando toca nos botões"),
+                           ("fx", "🎉 Sons de acerto, erro e festa")):
+                v = st.toggle(lab, value=bool(snd[k]) and not snd["muted"], key=f"snd_{k}")
+                if v != (bool(snd[k]) and not snd["muted"]):
+                    snd[k], snd["muted"], changed = v, False, True
+            vol = st.slider("Volume da música", 0, 100, int(snd["vol"]), step=10, key="snd_vol",
+                            disabled=not snd["music"])
+            if vol != snd["vol"]:
+                snd["vol"], changed = vol, True
+            st.caption("Também dá para silenciar tudo rapidinho no botão 🔊 no canto de cima da tela.")
+            if changed:
+                save_sound()
+                st.rerun()
+    if KIDS_PROFILE:
+        return
     with st.expander("🔒 Privacidade e dados"):
         st.markdown(PRIVACY_TEXT)
         if db.enabled():
@@ -576,6 +630,35 @@ def users_view() -> None:
     st.caption("Lembrete: se o login do Google estiver em modo de teste, adicione o e-mail também como "
                "usuário de teste no Google Cloud (Google Auth Platform → Público-alvo).")
 
+    # --- famílias (contas criadas pelos pais) ---
+    st.markdown("### 👨‍👩‍👧 Famílias")
+    smode = family.signup_mode()
+    nm = st.segmented_control("Quando um pai cria a conta da família:", ["approval", "open"], default=smode,
+                              format_func=lambda k: {"approval": "✋ Eu aprovo antes", "open": "✅ Entra direto"}[k],
+                              key="signup_mode")
+    if nm and nm != smode:
+        db.set_pref("__app__", "signup", nm)
+        st.toast("Salvo ✅")
+    for pnd in family.pending():
+        c1, c2 = st.columns([3, 1], vertical_alignment="center")
+        c1.markdown(f"⏳ **{pnd.get('parent', '')}** ({pnd['email']}) · criança: **{pnd.get('child', '')}** · "
+                    f"criada em {pnd.get('created', '')}")
+        if c2.button("✅ Aprovar", key=f"appr_{pnd['email']}", width="stretch"):
+            db.upsert_user(pnd["email"], active=True)
+            st.rerun()
+    fams = [r["email"] for r in rows if family.is_family(r["email"])]
+    if fams:
+        fpick = st.selectbox("Família", fams, format_func=lambda e: f"{family.info(e).get('parent', '')} · "
+                             f"{family.info(e).get('child', '')} ({e})", key="fam_pick")
+        c1, c2 = st.columns(2)
+        if c1.button("🔑 Zerar PIN", key="fam_reset_pin", width="stretch"):
+            family.reset_pin(fpick)
+            st.success("PIN zerado: no próximo acesso à área dos pais, eles criam outro.")
+        c2.caption(f"Autorização: {db.get_pref(fpick, 'consent_parents') or 'não registrada'}")
+    else:
+        st.caption("Nenhuma família ainda. Quando um pai entrar com o Google pela primeira vez, ele cria a conta.")
+    st.divider()
+
     existing = [r["email"] for r in rows if not r.get("is_admin")]
     pick = st.selectbox("Editar", ["➕ Novo usuário"] + existing)
     cur = next((r for r in rows if r["email"] == pick), {}) if pick != "➕ Novo usuário" else {}
@@ -593,6 +676,8 @@ def users_view() -> None:
         live_on = st.toggle("Pode usar o modo ao vivo (Gemini grátis)", value=bool(cur.get("live_enabled")))
         live_min = st.number_input("Minutos ao vivo por dia", min_value=1, max_value=60,
                                    value=int(cur.get("live_daily_minutes") or 10))
+        consent = st.checkbox("👨‍👩‍👧 Os pais autorizaram (obrigatório para contas do nível Infantil)",
+                              value=bool(cur and db.get_pref(cur["email"], "consent_parents")))
         st.markdown("**Chaves de API, serviço por serviço**")
         policy = dict(cur.get("key_policy") or {})
         enc = dict(cur.get("keys_enc") or {})
@@ -618,6 +703,10 @@ def users_view() -> None:
             db.upsert_user(target, name=name or None, active=active, level=None if lvl == "(livre)" else lvl,
                            level_locked=locked and lvl != "(livre)", daily_turns=None if turns == 0 else int(turns),
                            live_enabled=live_on, live_daily_minutes=int(live_min), key_policy=policy, keys_enc=enc)
+            if consent and not db.get_pref(target, "consent_parents"):
+                db.set_pref(target, "consent_parents", f"pelo admin · {_now_tag()}")
+            elif not consent:
+                db.set_pref(target, "consent_parents", "")
             st.success(f"Salvo: {target}")
             st.rerun()
     if cur and st.button(f"🗑️ Remover {cur['email']}", width="stretch"):
@@ -631,6 +720,155 @@ def users_view() -> None:
     if st.button("Salvar meus minutos"):
         db.upsert_user(email, is_admin=True, active=True, live_daily_minutes=int(mine))
         st.success("Salvo.")
+
+
+# --- Tela: Pais (perfil protegido por PIN) -----------------------------------------------
+def parents_view() -> None:
+    import time as _t
+    f = family.info(email)
+    child = f.get("child", "a criança")
+    if ss.get("fam_mode") != "parent" and not family.has_pin(email):
+        ui.hero("🔑 Criar um novo PIN", "O PIN foi zerado pelo administrador. Crie um novo para a área dos pais.")
+        with st.form("new_pin"):
+            p1 = st.text_input("Novo PIN (4 números)", type="password", max_chars=4)
+            p2 = st.text_input("Repita", type="password", max_chars=4)
+            if st.form_submit_button("Salvar e entrar", type="primary", width="stretch"):
+                if p1 != p2 or not family.valid_pin(p1):
+                    st.error("Os PINs precisam ser iguais e ter 4 números (nada de 1234 ou 0000).")
+                else:
+                    family.set_pin(email, p1)
+                    ss.fam_mode = "parent"
+                    st.rerun()
+        return
+    if ss.get("fam_mode") != "parent":
+        ui.hero("🔒 Área dos pais", f"Digite o PIN de 4 números para entrar. Aqui ficam os limites, os relatórios e "
+                f"as conversas de {child}.")
+        wait = ss.get("pin_lock", 0) - _t.time()
+        if wait > 0:
+            st.warning(f"Muitas tentativas. Tente de novo em {int(wait // 60) + 1} min.", icon="⏳")
+            return
+        with st.form("pin_form"):
+            pin = st.text_input("PIN", type="password", max_chars=4, placeholder="••••")
+            go = st.form_submit_button("🔓 Entrar", type="primary", width="stretch")
+        if go:
+            if family.check_pin(email, pin.strip()):
+                ss.fam_mode, ss.pin_tries = "parent", 0
+                ss.view = "pais"
+                st.rerun()
+            ss.pin_tries = ss.get("pin_tries", 0) + 1
+            if ss.pin_tries >= 5:
+                ss.pin_lock, ss.pin_tries = _t.time() + 300, 0
+            st.error("PIN errado.")
+        st.caption("Esqueceu o PIN? Peça ao administrador do app para zerar; no próximo acesso você cria outro.")
+        return
+
+    ui.hero("👨‍👩‍👧 Área dos pais", f"Tudo sobre {child}: limites, resumo da semana, conversas e privacidade.")
+    if st.button(f"👧 Voltar para o perfil de {child}", type="primary", width="stretch", key="to_kid"):
+        ss.fam_mode, ss.view, ss.kid_inside = "kid", "aprender", None
+        st.rerun()
+    if not family.has_pin(email):
+        st.warning("O PIN foi zerado pelo administrador. Crie um novo em 🔑 PIN, abaixo.", icon="🔑")
+
+    t1, t2, t3, t4, t5 = st.tabs(["📊 Progresso", "⏳ Limites", "📨 Resumo", "💬 Conversas", "🔒 Conta"])
+    with t1:
+        txt = report.family_report(email)
+        st.text(txt)
+        know, review = report.learned_words(email)
+        st.markdown("**✅ Palavras que já acerta:** " + (", ".join(know) if know else "—"))
+        st.markdown("**🔁 Vale treinar junto:** " + (", ".join(review) if review else "nada! 🎉"))
+    with t2:
+        opts = {3: "3 por dia", 5: "5 por dia", 10: "10 por dia", 0: "Sem limite"}
+        cur = daily_limit()
+        new = st.segmented_control("🪐 Planetas novos por dia", list(opts), format_func=lambda k: opts[k],
+                                   default=cur if cur in opts else 3, key="fam_limit")
+        if new is not None and new != cur:
+            db.set_pref(email, "kid_limit", str(new))
+            st.toast("Salvo ✅")
+        st.caption("Refazer planetas que já visitou e o ⚡ Desafio não contam.")
+        mopts = {0: "Sem limite", 15: "15 min", 30: "30 min", 45: "45 min", 60: "1 hora"}
+        cur_m = kid_minutes_limit()
+        new_m = st.segmented_control("⏳ Tempo de uso por dia", list(mopts), format_func=lambda k: mopts[k],
+                                     default=cur_m if cur_m in mopts else 0, key="fam_minutes")
+        if new_m is not None and new_m != cur_m:
+            db.set_pref(email, "kid_minutes", str(new_m))
+            st.toast("Salvo ✅")
+        st.caption(f"Hoje: {report.kid_minutes_today(email)} min de uso. Quando o tempo acaba, o Bip se despede "
+                   "e o perfil da criança só volta no dia seguinte (a área dos pais continua aberta).")
+    with t3:
+        cfg = notify.load_cfg(db.get_pref, email)
+        labels = {"email": "📧 E-mail", "telegram": "✈️ Telegram"}
+        chans = st.pills("Receber o resumo toda segunda por:", list(labels), format_func=lambda k: labels[k],
+                         selection_mode="multi", default=cfg["channels"], key="fam_chans")
+        mails = st.text_input("E-mails (separe por vírgula)", value=cfg["emails"] or email, key="fam_mails")
+        if "telegram" in (chans or []):
+            st.markdown("**Conectar o Telegram (uma vez só):**")
+            code = family.connect_code(email)
+            bot = notify.telegram_bot_name() if notify.telegram_ready() else ""
+            if not bot:
+                st.info("O Telegram ainda não foi ligado pelo administrador do app. Por enquanto, use o e-mail.", icon="ℹ️")
+            else:
+                st.markdown(f"1. Toque aqui para adicionar o robô ao **grupo da família**: "
+                            f"[➕ Adicionar @{bot} a um grupo](https://t.me/{bot}?startgroup={code})  \n"
+                            f"   (ou, para receber só você: [abrir conversa com @{bot}](https://t.me/{bot}?start={code}))\n"
+                            f"2. Se o Telegram não mandar sozinho, escreva no grupo: `/start {code}`\n"
+                            f"3. Volte aqui e toque em **Procurar**.")
+                if st.button("🔎 Procurar meu grupo", key="tg_find"):
+                    try:
+                        found = notify.telegram_find(code)
+                    except Exception as e:
+                        found, st.session_state["tg_err"] = None, str(e)
+                    if found:
+                        cfg["telegram"] = found["id"]
+                        cfg["telegram_name"] = found["name"]
+                        db.set_pref(email, "resumo", json.dumps(cfg, ensure_ascii=False))
+                        st.success(f"Conectado: {found['name']} ✅")
+                    else:
+                        st.warning("Ainda não achei. Confira se o robô está no grupo e se a mensagem com o código foi enviada.")
+            if cfg.get("telegram"):
+                st.caption(f"✅ Telegram conectado: {cfg.get('telegram_name') or cfg['telegram']}")
+        c1, c2 = st.columns(2)
+        if c1.button("💾 Salvar", type="primary", width="stretch", key="fam_save_rep"):
+            cfg.update(channels=list(chans or []), emails=mails)
+            db.set_pref(email, "resumo", json.dumps(cfg, ensure_ascii=False))
+            st.toast("Salvo ✅")
+        if c2.button("📨 Enviar agora (teste)", width="stretch", key="fam_send"):
+            cfg.update(channels=list(chans or []), emails=mails)
+            for line in notify.send_report(cfg, child, report.family_report(email)):
+                st.write(line)
+    with t4:
+        sess = db.sessions_recent(email)
+        if not sess:
+            st.caption("Nenhuma conversa ainda.")
+        else:
+            label = {x["id"]: f"{x['inicio']} · {x['conversa']} · {x['falas']} falas" for x in sess}
+            sid = st.selectbox("Abrir conversa", list(label), format_func=lambda i: label[i], key="fam_sess")
+            for t in db.session_turns(sid):
+                (ui.ai_bubble if t["role"] == "assistant" else ui.user_bubble)(t["text"])
+    with t5:
+        st.markdown(f"**Conta:** {email} · criada em {f.get('created', '—')}")
+        st.markdown(f"**Autorização dos pais:** registrada em {db.get_pref(email, 'consent_parents') or '—'}")
+        with st.expander("📄 Como o app usa os dados"):
+            st.markdown(family.PRIVACY_TEXT)
+        with st.form("fam_pin"):
+            st.markdown("**🔑 Trocar o PIN**")
+            p1 = st.text_input("Novo PIN", type="password", max_chars=4)
+            p2 = st.text_input("Repita", type="password", max_chars=4)
+            if st.form_submit_button("Salvar PIN"):
+                if p1 != p2 or not family.valid_pin(p1):
+                    st.error("Os PINs precisam ser iguais e ter 4 números (nada de 1234 ou 0000).")
+                else:
+                    family.set_pin(email, p1)
+                    st.success("PIN trocado ✅")
+        nm = st.text_input("Nome da criança", value=f.get("child", ""), key="fam_child")
+        if st.button("Salvar nome", key="fam_child_save") and nm.strip():
+            f["child"] = nm.strip()
+            db.set_pref(email, "familia", json.dumps(f, ensure_ascii=False))
+            st.toast("Salvo ✅")
+        st.divider()
+        sure = st.checkbox("Quero apagar todas as conversas desta conta (não dá para desfazer).", key="fam_del_ok")
+        if st.button("🗑️ Apagar conversas", disabled=not sure, key="fam_del"):
+            st.success(f"Pronto: {db.delete_conversations(email)} conversa(s) apagada(s).")
+        st.button("🚪 Sair da conta", on_click=st.logout, key="fam_logout")
 
 
 # --- Tela: aprender (gramática, vídeos, tradutor) ----------------------------------------
@@ -647,23 +885,7 @@ def learn_level() -> str:
 AVATARS = ["🧑🏻‍🚀", "🧑🏽‍🚀", "🧑🏿‍🚀", "👦🏻", "👦🏽", "👦🏿", "👧🏻", "👧🏽", "👧🏿", "🐶", "🐱", "🦁", "🐼", "🦖", "🤖"]
 
 
-PRIVACY_TEXT = """
-**O que o app faz:** é um app de prática de inglês. A criança faz missões, ganha estrelas e conversa por voz com o
-robozinho Bip. Não tem anúncios, compras nem conversa com outras pessoas.
-
-**Para onde vão os dados:**
-- 🎤 **Voz**: a gravação da fala é enviada ao **Groq** só para virar texto. O app não guarda o áudio.
-- 💬 **Conversa e missões**: o texto vai para o **Claude (Anthropic)** para criar as respostas e as missões. No modo
-  "ao vivo", vai para o **Gemini (Google)**.
-- 🔊 **Voz do Bip**: o texto é enviado a um serviço de voz (Microsoft Edge, Google ou OpenAI) para virar áudio.
-- 🗄️ **Guardado no banco do app (Neon)**: e-mail da conta, nome do astronauta, conversas em texto, respostas das
-  missões, estrelas e tempo de uso. O e-mail é usado só para entrar.
-- 🎬 **Vídeos**: vêm do YouTube no modo de privacidade reforçada (sem cookies de anúncio).
-
-**Combinados de segurança:** o Bip nunca pede dados pessoais (endereço, escola, telefone). Se a criança contar algo
-assim, ele muda de assunto e diz para falar com os pais. O responsável pode **ler todas as conversas** no Histórico,
-pedir para **apagar tudo** em Ajustes, e escolher limite de **tempo** e de **planetas por dia**.
-"""
+PRIVACY_TEXT = family.PRIVACY_TEXT
 
 
 def kids_astro() -> tuple[str, str]:
@@ -679,20 +901,22 @@ def kids_avatar() -> str:
     return parts[2] if len(parts) > 2 and parts[2] else "🧑‍🚀"
 
 
+def _acct_pref(key: str, default: int) -> int:
+    """Limite da própria família (Perfil Pais); se não tiver, vale o padrão do admin."""
+    if not db.enabled():
+        return default
+    for who in (email, "__app__"):
+        v = db.get_pref(who, key)
+        if v not in (None, ""):
+            try:
+                return int(v)
+            except ValueError:
+                pass
+    return default
+
+
 def kid_minutes_limit() -> int:
-    try:
-        return int((db.get_pref("__app__", "kid_minutes") if db.enabled() else None) or 0)
-    except ValueError:
-        return 0
-
-
-def kid_minutes_today(who: str) -> int:
-    import datetime as _dt
-    day = _dt.datetime.now(compete.BRT).strftime("%Y-%m-%d")
-    try:
-        return int(float((db.get_pref(who, f"tempo:{day}") if db.enabled() else None) or 0) // 60)
-    except ValueError:
-        return 0
+    return _acct_pref("kid_minutes", 0)
 
 
 def kid_time_tick() -> None:
@@ -715,11 +939,8 @@ def kid_time_tick() -> None:
 
 
 def daily_limit() -> int:
-    """Planetas novos por dia no perfil infantil (0 = sem limite). O admin muda em Ajustes."""
-    try:
-        return int((db.get_pref("__app__", "kid_limit") if db.enabled() else None) or rewards.DAILY_LIMIT)
-    except ValueError:
-        return rewards.DAILY_LIMIT
+    """Planetas novos por dia no perfil infantil (0 = sem limite). Os pais mudam no Perfil Pais."""
+    return _acct_pref("kid_limit", rewards.DAILY_LIMIT)
 
 
 def astro_form(key: str = "astro_form", title: str = "### 👩‍🚀 Vamos montar o seu astronauta!") -> None:
@@ -872,14 +1093,58 @@ def race_view(lvl: str) -> None:
         st.rerun()
     if not db.enabled():
         return
+    mine = friends_box()
     st.markdown('<div style="font-size:1.3rem;font-weight:900;margin:18px 0 4px">🏆 Recordes do desafio (semana)</div>',
                 unsafe_allow_html=True)
-    st.markdown(race_board_html(compete.challenge_board(), "score", "pts"), unsafe_allow_html=True)
+    st.markdown(race_board_html(compete.challenge_board(only=mine), "score", "pts"), unsafe_allow_html=True)
     st.markdown('<div style="font-size:1.3rem;font-weight:900;margin:18px 0 4px">🏁 Corrida Espacial da semana</div>'
                 '<div style="color:#AFC0E8;font-size:.9rem">Cada um corre até a sua linha de chegada: criança '
                 f'{compete.GOAL_KID} pts, adulto {compete.GOAL_ADULT} pts. ⭐ estrela = 10 · 💬 fala = 2 · 🎬 vídeo = 15 · '
                 'recomeça toda segunda.</div>', unsafe_allow_html=True)
-    st.markdown(race_track_html(compete.board()), unsafe_allow_html=True)
+    st.markdown(race_track_html(compete.board(only=mine)), unsafe_allow_html=True)
+
+
+def friends_box() -> set:
+    """Amigos da Corrida: convites pelo nome (sem mostrar e-mail), aceitar/recusar. Retorna eu + amigos."""
+    fr = db.friends(email)
+    astros = db.pref_all("astronauta")
+    people = {u["email"]: u for u in db.list_users() if u.get("active") and u["email"] != email}
+
+    def who(e: str) -> str:
+        name, avatar = compete.profile(e, astros)
+        f = family.info(e)
+        return f"{avatar} {f.get('child') or name}"
+
+    for e in sorted(fr["in"]):
+        st.markdown(f'<div class="kp-card" style="border-color:#7EF0B5">🤝 <b>{html_escape(who(e))}</b> quer ser seu '
+                    f'amigo na Corrida Espacial!</div>', unsafe_allow_html=True)
+        c1, c2 = st.columns(2)
+        if c1.button("✅ Aceitar", key=f"fr_ok_{e}", type="primary", width="stretch"):
+            db.friend_answer(e, email, True)
+            st.rerun()
+        if c2.button("Agora não", key=f"fr_no_{e}", width="stretch"):
+            db.friend_answer(e, email, False)
+            st.rerun()
+    with st.popover(f"🤝 Amigos ({len(fr['ok'])})", width="stretch"):
+        st.markdown("**Convide alguém para correr com você!** A pessoa precisa aceitar.")
+        options = [e for e in people if e not in fr["ok"] and e not in fr["out"]]
+        if options:
+            pick = st.selectbox("Quem?", options, format_func=who, key="fr_pick")
+            if st.button("📨 Mandar convite", type="primary", width="stretch", key="fr_send"):
+                db.friend_request(email, pick)
+                st.toast("Convite enviado! 🚀")
+                st.rerun()
+        else:
+            st.caption("Ninguém novo para convidar agora.")
+        for e in sorted(fr["out"]):
+            st.caption(f"⏳ Esperando {who(e)} aceitar")
+        for e in sorted(fr["ok"]):
+            c1, c2 = st.columns([3, 1], vertical_alignment="center")
+            c1.markdown(who(e))
+            if c2.button("Sair", key=f"fr_rm_{e}"):
+                db.friend_remove(email, e)
+                st.rerun()
+    return {email} | fr["ok"]
 
 
 def challenge_play(ch: dict) -> None:
@@ -986,7 +1251,7 @@ def kids_galaxy(lvl: str, done: dict) -> None:
     goal_ok = len(today_nums) >= rewards.DAILY_GOAL
     hud = [{"t": f"🔥 {streak}"}, {"t": "🎯 ✓" if goal_ok else "🎯 0/1", "ok": goal_ok}, {"t": f"💰 {wallet}"}]
     if KIDS_PROFILE and kid_minutes_limit():
-        hud.append({"t": f"⏳ {max(0, kid_minutes_limit() - kid_minutes_today(email))} min"})
+        hud.append({"t": f"⏳ {max(0, kid_minutes_limit() - report.kid_minutes_today(email))} min"})
     in_gal = sum(1 for n in range(first, last + 1) if n in done)
     left = 10 - in_gal
     boss = space.stop(last)["pt"]
@@ -1607,24 +1872,15 @@ def learn_view() -> None:
 
 
 # --- Roteamento das telas sem conversa ativa -----------------------------------------------
-if KIDS_PROFILE:
+if KIDS_PROFILE and ss.view != "pais":
     kid_time_tick()
     if db.enabled() and not db.get_pref(email, "consent_parents"):
-        # primeira vez de uma conta infantil: um adulto precisa ler e autorizar (com uma continha, para a criança não pular)
-        st.markdown("## 👨‍👩‍👧 Para os pais ou responsáveis")
-        st.markdown(PRIVACY_TEXT)
-        with st.form("consent"):
-            ok_box = st.checkbox("Sou pai, mãe ou responsável por esta criança e autorizo o uso do app.")
-            q = st.text_input("Para confirmar que é um adulto: quanto é 7 × 8?")
-            if st.form_submit_button("✅ Autorizar", type="primary", width="stretch"):
-                if ok_box and q.strip() == "56":
-                    db.set_pref(email, "consent_parents", _now_tag())
-                    st.rerun()
-                else:
-                    st.error("Marque a caixa e responda a conta corretamente.")
+        galaxy.mascot("Almost ready! 🔒", "Quase pronto! Peça para um adulto liberar o app para você. "
+                      "Ele precisa ler e autorizar antes da primeira viagem.", key="kid_wait", sound=False)
+        bottom_nav()
         st.stop()
     lim_min = kid_minutes_limit()
-    if lim_min and kid_minutes_today(email) >= lim_min:
+    if lim_min and report.kid_minutes_today(email) >= lim_min:
         galaxy.mascot("Time to rest! See you tomorrow! 🌙", f"Hora de descansar! Você já brincou {lim_min} minutos hoje. "
                       "Seus planetas e estrelas estão guardadinhos. Até amanhã!", key="kid_rest", sound=False)
         bottom_nav()
@@ -1632,7 +1888,7 @@ if KIDS_PROFILE:
 
 if ss.view != "inicio":
     {"historico": history_view, "ajustes": settings_view, "usuarios": users_view,
-     "aprender": learn_view}.get(ss.view, history_view)()
+     "aprender": learn_view, "pais": parents_view}.get(ss.view, history_view)()
     bottom_nav()
     st.stop()
 
@@ -1656,6 +1912,10 @@ if not ss.started:
     if prof.level_locked:
         if not kids_home:
             st.markdown(f"**Nível:** {LEVELS[ss.level]['label']}")
+    elif kids_home:
+        ss.level_pick_k = ss.level  # infantil: seletor pequeno, discreto (só para quem pode trocar)
+        st.selectbox("Nível", list(LEVELS), format_func=lambda k: LEVELS[k]["label"], key="level_pick_k",
+                     on_change=_set_level, args=("level_pick_k",))
     else:
         ss.level_pick = ss.level    # sempre igual ao nível do app
         st.pills("Nível", list(LEVELS), format_func=lambda k: LEVELS[k]["label"], selection_mode="single",
@@ -1705,11 +1965,26 @@ if not ss.started:
         phases = list(scen["phases"])
         done_k = db.exercises_done_map(email, ss.level) if db.enabled() else {}
         cur_ph = phases[min(((kids_next(done_k) - 1) // 10), len(phases) - 1)]
-        phase = (st.pills("Fase", phases, default=cur_ph, selection_mode="single", key="kid_phase") or cur_ph) \
-            if prof.is_admin else cur_ph
+        phase = cur_ph
+        if prof.is_admin:   # a criança segue a fase da galáxia; o admin pode escolher outra
+            GX = ["sun.webp", "planet_sgr_a.webp", "p_ringpink.webp"]
+            phase = ss.get("kid_phase_k") if ss.get("kid_phase_k") in phases else cur_ph
+            pk = ui.kid_tiles([{"key": ph, "label": ph.split("·")[-1].strip(), "img": "app/static/theme/" + GX[i % 3]}
+                               for i, ph in enumerate(phases)], phase, key="kid_phase_tiles", small=True)
+            if pk and pk != phase:
+                ss.kid_phase_k = pk
+                st.rerun()
         sits = scen["phases"][phase]
-        situation = st.pills("Assunto", list(sits), selection_mode="single", default=list(sits)[0],
-                             key=f"sit_kid_{phases.index(phase)}") or list(sits)[0]
+        names = list(sits)
+        skey = f"sit_kid_k_{phases.index(phase)}"
+        situation = ss.get(skey) if ss.get(skey) in names else names[0]
+        st.markdown('<div style="font-weight:900;font-size:1.15rem;margin:10px 0 6px">Sobre o que vamos conversar?</div>',
+                    unsafe_allow_html=True)
+        sp = ui.kid_tiles([{"key": n, "emoji": n.split(" ", 1)[0], "label": n.split(" ", 1)[-1]} for n in names],
+                          situation, key=f"kid_sit_tiles_{phases.index(phase)}", cols=3)
+        if sp and sp != situation:
+            ss[skey] = sp
+            st.rerun()
         role = sits[situation]
         context_label = f"{scen['label']} · {situation}"
     elif scen["situations"]:

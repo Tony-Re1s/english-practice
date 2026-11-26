@@ -744,6 +744,43 @@ def say_now(text: str, tag: str, key: str = "say_now") -> None:
     _say_now(key=key, data={"text": text, "tag": tag})
 
 
+# --- Palavras para tocar e ouvir (e, depois do teste de pronúncia, coloridas) --------------
+_WORDS_CSS = """
+.wc { display:flex; flex-wrap:wrap; gap:8px; font-family:'Nunito',system-ui,sans-serif; margin:4px 0 8px; }
+.wc b { display:inline-flex; flex-direction:column; align-items:center; padding:7px 12px; border-radius:14px; cursor:pointer;
+  background:rgba(255,255,255,.1); border:2px solid rgba(201,168,92,.7); color:#F4ECDC; font-size:17px; font-weight:800;
+  box-shadow:0 3px 0 rgba(0,0,0,.4); transition:transform .1s; -webkit-tap-highlight-color:transparent; }
+.wc b:active { transform:translateY(2px); }
+.wc b small { font-size:11px; font-weight:700; opacity:.8; margin-top:1px; }
+.wc b.ok { background:rgba(80,200,120,.25); border-color:#5FD38A; }
+.wc b.near { background:rgba(255,200,60,.22); border-color:#FFC83C; }
+.wc b.miss { background:rgba(255,90,90,.22); border-color:#FF6B6B; }
+.wc.kids b { border-color:#5FE3FF; color:#fff; font-size:20px; }
+"""
+_WORDS_JS = """
+export default function (component) {
+  const { data, parentElement } = component;
+  const old = parentElement.querySelector('.wc'); if (old) old.remove();
+  const box = document.createElement('div'); box.className = 'wc' + (data.kids ? ' kids' : '');
+  (data.items || []).forEach((it) => {
+    const b = document.createElement('b'); b.className = it.status || '';
+    b.innerHTML = it.w + (it.say_like ? `<small>${it.say_like}</small>` : '');
+    b.addEventListener('click', () => { try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(it.w);
+      u.lang = 'en-US'; u.rate = .7; const v = speechSynthesis.getVoices().find(v => /en-US/.test(v.lang) && /(Samantha|Ava|Aria|Jenny|Google US)/.test(v.name));
+      if (v) u.voice = v; speechSynthesis.speak(u); } catch (e) {} });
+    box.appendChild(b);
+  });
+  parentElement.appendChild(box);
+}
+"""
+_words = st.components.v2.component("english_words", css=_WORDS_CSS, js=_WORDS_JS)
+
+
+def word_chips(items: list[dict], key: str, kids: bool = False) -> None:
+    """items: [{'w', 'say_like'?, 'status'? ok|near|miss}]. Tocar numa palavra fala ela devagar."""
+    _words(key=key, data={"items": items, "kids": kids})
+
+
 def dive_bg(url: str, surface: bool = True) -> None:
     """Fundo de "dentro do planeta": entra com um zoom de mergulho e depois segue com o movimento lento."""
     bg = (f"url('{url}') center/cover no-repeat" if surface else

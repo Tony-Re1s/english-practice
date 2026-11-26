@@ -102,6 +102,23 @@ EN = {
     "ex.: 'cash flow' ou 'fazer hora extra'": "e.g. 'fluxo de caixa' or 'work overtime'", "…ou fale": "…or say it",
     "🔤 Traduzir": "🔤 Translate", "Traduzindo...": "Translating...", "🔊 Ouvir em inglês": "🔊 Listen in English",
     "**Outras formas:** ": "**Other ways:** ",
+    # --- Revisar frase / pronúncia ---
+    "☝️ Escolha a opção correta.": "☝️ Choose the correct option.", "Revisar frase": "Check my sentence", "✍️ Revisar frase": "✍️ Check my sentence",
+    "Sua frase em inglês": "Your sentence in English", "ex.: I got a customer too": "e.g. I got a customer too",
+    "🔍 Analisar frase": "🔍 Check sentence", "Analisando...": "Checking...", "**💬 Mais natural**": "**💬 More natural**",
+    "🔊 Normal": "🔊 Normal", "🐢 Devagar": "🐢 Slow", "🎯 Praticar": "🎯 Practise",
+    "Toque no microfone, fale a frase inteira e toque de novo para parar.":
+        "Tap the mic, say the whole sentence, then tap again to stop.",
+    "🔁 Tentar de novo": "🔁 Try again", "🔄 Começar outra rodada": "🔄 Start another round", "Eu falei certo": "I said it right",
+    "🟢 chegou · 🟡 quase · 🔴 não chegou. O reconhecimento de voz às vezes erra: se você tem certeza de que falou "
+    "certo, marque abaixo.": "🟢 got it · 🟡 almost · 🔴 didn't come through. Speech recognition sometimes gets it "
+    "wrong: if you're sure you said it right, mark it below.",
+    "🎤 O teste de pronúncia precisa do reconhecimento de voz ligado.": "🎤 The pronunciation test needs speech recognition on.",
+    "🌟 Excelente! Saiu muito claro.": "🌟 Excellent! That was very clear.", "👏 Muito bom! Só um ou outro ajuste.":
+        "👏 Very good! Just a couple of tweaks.",
+    "🙂 Boa! Ouça as palavras em amarelo/vermelho e tente de novo.": "🙂 Nice! Listen to the yellow/red words and try again.",
+    "🎧 Vamos de novo: ouça a frase devagar e repita junto. O microfone às vezes não pega bem — tente mais perto.":
+        "🎧 Let's go again: listen to the slow version and repeat along. The mic sometimes misses — try closer.",
     # --- Corrida / Desafio (adulto) ---
     "⚡ Desafio Relâmpago": "⚡ Lightning Challenge", "🏳️ Parar": "🏳️ Stop", "🔊 Ouvir de novo": "🔊 Listen again",
     "Faça pelo menos um exercício de gramática para liberar o desafio.":
@@ -193,6 +210,22 @@ EN = {
 
 # trechos (para textos montados com variáveis); os mais longos são aplicados primeiro
 FRAG = [
+    ("Escreva do seu jeito. O app diz se dá para entender, o que muda na gramática, o que a frase diz ao pé da letra e "
+     "como um nativo falaria.", "Write it your way. The app tells you if it's understandable, what changes in the "
+     "grammar, what it literally says and how a native would put it."),
+    ("✍️ Revisar frase", "✍️ Check my sentence"), ("✅ Perfeita", "✅ Perfect"),
+    ("🟢 Entende-se — dá para melhorar", "🟢 Understood — can be improved"),
+    ("🟡 Entende-se, mas soa estranho", "🟡 Understood, but sounds odd"), ("🔴 Muda o sentido ou confunde", "🔴 Changes the meaning or confuses"),
+    ("**🧠 Entendimento**", "**🧠 Understanding**"), ("**📐 Gramática**", "**📐 Grammar**"),
+    ("Correção mínima: **", "Minimal correction: **"),
+    ("**🔍 Literal (o que a sua frase diz ao pé da letra)**", "**🔍 Literal (what your sentence says word for word)**"),
+    ("sua frase, só com o mínimo ajustado", "your sentence, with only the minimum changed"), ("correção · ", "correction · "),
+    ("neutro · ", "neutral · "),
+    ("**🗣️ Palavras para caprichar na pronúncia** — toque para ouvir devagar",
+     "**🗣️ Words to polish your pronunciation** — tap to hear them slowly"),
+    ("🎯 Sua vez: fale esta frase", "🎯 Your turn: say this sentence"), ("O app ouviu: “", "The app heard: “"),
+    (" · melhor: ", " · best: "), ("% · tentativa ", "% · try "), ("Não consegui analisar: ", "Couldn't check: "),
+    ("Não consegui ouvir: ", "Couldn't listen: "), ("Não consegui falar agora: ", "Couldn't speak right now: "),
     ("Concluídos: **", "Completed: **"), ("** de ", "** of "), ("🪐 Planeta ", "🪐 Planet "), (" · revisão ", " · review "),
     ("Você já concluiu este exercício (melhor nota: ", "You've already finished this exercise (best score: "),
     ("). Pode refazer quando quiser.", "). You can redo it anytime."),

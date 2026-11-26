@@ -3,6 +3,7 @@
 import base64
 import json
 import re
+import zlib
 from html import escape as html_escape
 import uuid
 from datetime import datetime
@@ -14,7 +15,7 @@ from config import (DEFAULT_LEVEL, LEVELS, LIVE_MAX_SESSION_MIN, LIVE_MODEL, LIV
                     MAX_HISTORY_TURNS, PROVIDER_LABEL, PROVIDERS)
 from prompts import (FREE_TALK_OPEN, FREE_TALK_ROLE, LIVE_SYSTEM, SCENARIOS, START_MESSAGE, TOPIC_ROLE,
                      TUTOR_SYSTEM)
-from services import album, compete, family, galaxy, i18n, nav, notify, report, rewards, space, db, learn, live, llm, users, voice
+from services import album, compete, family, galaxy, i18n, nav, notify, pronounce, report, rewards, space, db, learn, live, llm, users, voice
 from syllabus import topic_for
 from services.voice_chat import voice_chat
 
@@ -1601,8 +1602,7 @@ def grammar_tab(lvl: str) -> None:
         answers = {}
         for i, q in enumerate(qs):
             if q.get("type") == "mc" and q.get("options"):
-                if q.get("instruction_pt"):
-                    st.caption(q["instruction_pt"])
+                st.caption(q.get("instruction_pt") or "☝️ Escolha a opção correta.")
                 answers[i] = st.radio(f"{i + 1}. {q['prompt']}", q["options"], index=None, key=f"q_{key}_{i}")
             else:
                 if q.get("instruction_pt") and q.get("type") == "mc":
@@ -1815,6 +1815,148 @@ def _now_tag() -> str:
     return str(_t.time())
 
 
+def _play(text: str, pace: str, autoplay: bool = True) -> None:
+    """Toca a frase na voz boa do app (normal ou devagar), guardando o áudio para não gerar de novo."""
+    try:
+        cache = ss.setdefault("tts_cache", {})
+        k = f"{pace}:{text}"
+        if k not in cache:
+            cache[k] = voice.speak(text, pace=pace, log=log)[:2]
+        st.audio(cache[k][0], format=cache[k][1], autoplay=autoplay)
+    except Exception as e:
+        st.caption(f"Não consegui falar agora: {e}")
+
+
+def pron_practice(target: str, key: str, kids: bool = False) -> None:
+    """Teste de pronúncia animado: grava, compara palavra por palavra e dá chance de marcar 'eu falei certo'."""
+    if not voice.can_listen():
+        st.caption("🎤 O teste de pronúncia precisa do reconhecimento de voz ligado.")
+        return
+    stt = ss.setdefault(f"pp_{key}", {"tries": 0, "best": 0, "last": None, "fix": []})
+    st.markdown(f'<div class="kp-card" style="text-align:center"><div style="opacity:.8">'
+                f'{"🎤 Agora fala você!" if kids else "🎯 Sua vez: fale esta frase"}</div>'
+                f'<div style="font-size:1.35rem;font-weight:800;margin-top:4px">{html_escape(target)}</div></div>',
+                unsafe_allow_html=True)
+    rec = st.audio_input("Grave", key=f"pp_mic_{key}_{stt['tries']}", label_visibility="collapsed")
+    if rec is not None:
+        with st.spinner("Ouvindo..."):
+            try:
+                heard = voice.transcribe(rec.getvalue(), rec.type or "audio/wav", log=log, context=target)
+            except Exception as e:
+                heard = ""
+                st.caption(f"Não consegui ouvir: {e}")
+        res = pronounce.score(target, heard)
+        stt.update(last={"heard": heard, **res}, fix=[], tries=stt["tries"] + 1)
+        stt["best"] = max(stt["best"], res["pct"])
+        st.rerun()
+    last = stt["last"]
+    if not last:
+        st.caption("Toque no microfone, fale a frase inteira e toque de novo para parar." if not kids else
+                   "Toque no microfone, fale e toque de novo! 🎤")
+        return
+    items = [dict(w) for w in last["words"]]
+    for it in items:
+        if it["w"] in stt["fix"]:
+            it["status"] = "ok"
+    pct = round(100 * sum(1 if i["status"] == "ok" else .6 if i["status"] == "near" else 0 for i in items) / max(1, len(items)))
+    stt["best"] = max(stt["best"], pct)
+    stars = "⭐" * (3 if pct >= 90 else 2 if pct >= 70 else 1 if pct >= 40 else 0)
+    if kids:
+        galaxy.mascot(pronounce.cheer(pct, kids=True), f"{stars} Você chegou a {pct}%! Toque nas palavras para ouvir.",
+                      party=pct >= 70, key=f"pp_bip_{key}_{stt['tries']}_{pct}", sound=pct >= 70)
+    else:
+        st.markdown(f"**{pronounce.cheer(pct)}** {stars} · **{pct}%** · melhor: {stt['best']}% · tentativa {stt['tries']}/3")
+    ui.word_chips(items, key=f"pp_chips_{key}", kids=kids)
+    if last["heard"]:
+        st.caption(f"O app ouviu: “{last['heard']}”")
+    wrong = [i["w"] for i in items if i["status"] != "ok"]
+    if wrong:
+        st.caption("🟢 chegou · 🟡 quase · 🔴 não chegou. O reconhecimento de voz às vezes erra: se você tem certeza "
+                   "de que falou certo, marque abaixo." if not kids else "Achou que falou certo? Toque no botão! 👍")
+        cols = st.columns(min(4, len(wrong)))
+        for j, w in enumerate(wrong[:8]):
+            if cols[j % len(cols)].button(f"👍 {w}", key=f"pp_ok_{key}_{w}_{j}", help="Eu falei certo"):
+                stt["fix"].append(w)
+                st.rerun()
+    if stt["tries"] < 3 and pct < 100:
+        if st.button("🔁 Tentar de novo", key=f"pp_again_{key}"):
+            stt["last"] = None
+            st.rerun()
+    elif stt["tries"] >= 3:
+        if st.button("🔄 Começar outra rodada", key=f"pp_reset_{key}"):
+            ss.pop(f"pp_{key}", None)
+            st.rerun()
+
+
+VERDICT = {"perfect": ("✅", "Perfeita", "#5FD38A"), "clear": ("🟢", "Entende-se — dá para melhorar", "#5FD38A"),
+           "awkward": ("🟡", "Entende-se, mas soa estranho", "#FFC83C"), "unclear": ("🔴", "Muda o sentido ou confunde", "#FF6B6B")}
+
+
+def sentence_tab(lvl: str) -> None:
+    """Revisar frase: entendimento, gramática, literal e jeitos mais naturais + áudio e teste de pronúncia."""
+    st.markdown('<div style="font-size:1.35rem;font-weight:800">✍️ Revisar frase</div>'
+                '<div style="opacity:.8;margin-bottom:6px">Escreva do seu jeito. O app diz se dá para entender, '
+                'o que muda na gramática, o que a frase diz ao pé da letra e como um nativo falaria.</div>',
+                unsafe_allow_html=True)
+    with st.form("sent_form"):
+        text = st.text_area("Sua frase em inglês", key="sent_text", height=80,
+                            placeholder="ex.: I got a customer too")
+        go = st.form_submit_button("🔍 Analisar frase", type="primary", width="stretch")
+    if go and text.strip():
+        with st.spinner("Analisando..."):
+            try:
+                ss.sent_res, u = learn.check_sentence(text, LEVELS[lvl]["label"], prof.keys.get("anthropic"))
+                ss.sent_res["_src"] = text.strip()
+                ss.sent_target = None
+                log(step="revisar frase", provider="Anthropic", model=u["model"], ok=True,
+                    input_tokens=u["input_tokens"], output_tokens=u["output_tokens"])
+            except Exception as e:
+                st.error(f"Não consegui analisar: {e}")
+    r = ss.get("sent_res")
+    if not r:
+        return
+    ico, lab, color = VERDICT.get(r.get("verdict"), VERDICT["clear"])
+    st.markdown(f'<div class="kp-card" style="border-color:{color}"><div style="font-size:1.25rem;font-weight:800">'
+                f'{ico} {lab}</div><div style="opacity:.75;margin-top:2px">“{html_escape(r["_src"])}”</div></div>',
+                unsafe_allow_html=True)
+    st.markdown(f"**🧠 Entendimento**  \n{r.get('understanding_pt', '')}")
+    gram = r.get("grammar_pt", "")
+    st.markdown(f"**📐 Gramática** {'✅' if r.get('grammar_ok') else '✏️'}  \n{gram}")
+    if r.get("corrected") and r["corrected"].strip() != r["_src"]:
+        st.markdown(f"Correção mínima: **{html_escape(r['corrected'])}**")
+    st.markdown(f"**🔍 Literal (o que a sua frase diz ao pé da letra)**  \n{r.get('literal_pt', '')}")
+    st.markdown("**💬 Mais natural**")
+    options = ([{"text": r["corrected"], "register": "correção", "note_pt": "sua frase, só com o mínimo ajustado"}]
+               if r.get("corrected") else []) + list(r.get("natural") or [])
+    seen = set()
+    for j, o in enumerate(options):
+        t = (o.get("text") or "").strip()
+        if not t or t.lower() in seen:
+            continue
+        seen.add(t.lower())
+        st.markdown(f'<div class="kp-card"><div style="font-size:1.15rem;font-weight:800">{html_escape(t)}</div>'
+                    f'<div style="opacity:.75;font-size:.9rem">{html_escape(o.get("register", ""))} · '
+                    f'{html_escape(o.get("note_pt", ""))}</div></div>', unsafe_allow_html=True)
+        c1, c2, c3 = st.columns(3)
+        if c1.button("🔊 Normal", key=f"sn_{j}", width="stretch"):
+            ss.sent_play = (t, "normal")
+        if c2.button("🐢 Devagar", key=f"ss_{j}", width="stretch"):
+            ss.sent_play = (t, "slow")
+        if c3.button("🎯 Praticar", key=f"sp_{j}", width="stretch"):
+            ss.sent_target = t
+        if ss.get("sent_play") and ss.sent_play[0] == t:
+            _play(*ss.pop("sent_play"))
+    if r.get("words"):
+        st.markdown("**🗣️ Palavras para caprichar na pronúncia** — toque para ouvir devagar")
+        ui.word_chips([{"w": w["word"], "say_like": w.get("say_like", "")} for w in r["words"]], key="sent_words")
+        tips = [f"**{w['word']}**: {w['tip_pt']}" for w in r["words"] if w.get("tip_pt")]
+        if tips:
+            st.caption(" · ".join(tips))
+    if ss.get("sent_target"):
+        st.divider()
+        pron_practice(ss.sent_target, key="sent_" + str(zlib.crc32(ss.sent_target.encode())))
+
+
 def translator_tab() -> None:
     kids = bool(LEVELS.get(ss.level, {}).get("kids"))
     if kids:
@@ -1862,6 +2004,8 @@ def translator_tab() -> None:
                 ui.say_now(k.get("english", ""), f"w{_now_tag()}", key="say_now_tr2")
             if c2.button("🔊 Ouvir a frase", width="stretch", key="tr_k2"):
                 ui.say_now(k.get("example_en", ""), f"e{_now_tag()}", key="say_now_tr3")
+            if k.get("english"):
+                pron_practice(k["english"], key="kid_" + str(zlib.crc32(k["english"].encode())), kids=True)
         return
     if go and text.strip():
         with st.spinner("Traduzindo..."):
@@ -1938,16 +2082,20 @@ def learn_view() -> None:
         items = [{"key": "gram", "label": "Gramática", "img": theme_img("tile_lon_grammar.webp"), "emoji": "📝"},
                  {"key": "vid", "label": "Vídeos", "img": theme_img("tile_lon_videos.webp"), "emoji": "🎬"},
                  {"key": "tr", "label": "Tradutor", "img": theme_img("tile_lon_translate.webp"), "emoji": "🔤"},
+                 {"key": "sent", "label": "Revisar frase", "img": theme_img("tile_lon_sentence.webp"), "emoji": "✍️"},
                  {"key": "race", "label": "Corrida", "img": theme_img("tile_lon_race.webp"), "emoji": "🏁"}]
         cur = ss.get("adult_tab", "gram")
         pk = ui.kid_tiles(items, cur, key="adult_tabs", theme="london")
         if pk and pk != cur:
             ss.adult_tab = pk
             st.rerun()
-        {"gram": grammar_tab, "vid": videos_tab, "race": race_view}.get(cur, lambda _l: translator_tab())(lvl)
+        {"gram": grammar_tab, "vid": videos_tab, "race": race_view, "sent": sentence_tab}.get(
+            cur, lambda _l: translator_tab())(lvl)
         return
     ui.hero("📚 Aprender", "Trilhas separadas da conversa: gramática por nível, vídeos para treinar a escuta e um tradutor.")
-    t1, t2, t3 = st.tabs(["📝 Gramática", "🎬 Vídeos", "🔤 Tradutor"])
+    t1, t2, t3, t4 = st.tabs(["📝 Gramática", "🎬 Vídeos", "🔤 Tradutor", "✍️ Revisar frase"])
+    with t4:
+        sentence_tab(lvl)
     with t1:
         grammar_tab(lvl)
     with t2:

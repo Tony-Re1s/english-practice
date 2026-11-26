@@ -56,6 +56,48 @@ def translate(text: str, api_key: str | None) -> tuple[dict, dict]:
     return _tool_call(system, text.strip(), TRANSLATE_TOOL, api_key, max_tokens=900)
 
 
+SENTENCE_TOOL = {
+    "name": "sentence_check",
+    "description": "Feedback on a sentence a Brazilian learner wrote in English, in layers, without being picky.",
+    "input_schema": {
+        "type": "object",
+        "properties": {
+            "verdict": {"type": "string", "enum": ["perfect", "clear", "awkward", "unclear"],
+                        "description": "perfect = correct and natural; clear = understood, small grammar/style issues; "
+                                       "awkward = understood but sounds strange or translated from Portuguese; "
+                                       "unclear = a native would misunderstand or the meaning changes."},
+            "understanding_pt": {"type": "string", "description": "In Portuguese, 1-2 sentences: would a native understand, and WHAT they would understand."},
+            "grammar_ok": {"type": "boolean"},
+            "grammar_pt": {"type": "string", "description": "In Portuguese: the grammar issue(s) explained simply, or 'Está correta.' Never call style choices errors."},
+            "corrected": {"type": "string", "description": "Minimal correction: change as little as possible (same as input if already correct)."},
+            "literal_pt": {"type": "string", "description": "What the learner's sentence literally says, translated word-for-word into Portuguese, so they see any hidden meaning."},
+            "natural": {"type": "array", "items": {"type": "object", "properties": {
+                "text": {"type": "string"}, "register": {"type": "string", "enum": ["informal", "neutro", "formal"]},
+                "note_pt": {"type": "string", "description": "Very short note in Portuguese on when to use it."}},
+                "required": ["text", "register", "note_pt"]},
+                "description": "2-3 natural ways a native would say the same idea."},
+            "words": {"type": "array", "items": {"type": "object", "properties": {
+                "word": {"type": "string"}, "say_like": {"type": "string", "description": "Pronunciation with Portuguese sounds, stressed syllable in CAPS, e.g. 'KLAI-ent'."},
+                "tip_pt": {"type": "string", "description": "Short pronunciation tip in Portuguese (optional)."}},
+                "required": ["word", "say_like"]},
+                "description": "The 3-6 words of the corrected sentence that Brazilians most often mispronounce."},
+        },
+        "required": ["verdict", "understanding_pt", "grammar_ok", "grammar_pt", "corrected", "literal_pt", "natural", "words"],
+    },
+}
+
+
+def check_sentence(text: str, level_label: str, api_key: str | None) -> tuple[dict, dict]:
+    """Analisa a frase em camadas: entendimento, gramática, literal e jeitos mais naturais (sem ser 'ao pé da letra')."""
+    system = ("You are a kind, experienced English teacher for Brazilian adults. The learner wrote a sentence in English "
+              "and wants honest feedback in layers. Priority: communication. If a native would understand it, say so "
+              "clearly and never treat it as a failure. Separate real grammar errors from style or naturalness. Keep the "
+              "minimal correction minimal. Explanations in simple Brazilian Portuguese, short. "
+              f"Learner level: {level_label}. If the input is in Portuguese, treat it as what they want to say and give "
+              "the English in 'corrected' and 'natural', with verdict 'clear'.")
+    return _tool_call(system, text.strip(), SENTENCE_TOOL, api_key, max_tokens=1400)
+
+
 KIDS_TRANSLATE_TOOL = {
     "name": "kids_word",
     "description": "A word or tiny phrase translated for a Brazilian child aged 7-8.",

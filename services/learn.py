@@ -199,6 +199,7 @@ KIDS_EXERCISE_TOOL = {
                         "prompt": {"type": "string", "description": "Short English text shown on screen (a word or a 2-6 word sentence). For 'fill' use ___ for the gap. Can be empty if the instruction is enough."},
                         "options": {"type": "array", "items": {"type": "string"}, "description": "For 'mc': 3 short options (one or two words each), in English unless the instruction asks for Portuguese."},
                         "emojis": {"type": "array", "items": {"type": "string"}, "description": "For 'mc': one emoji per option, same order, that shows its meaning (e.g. 🍎 for apple). Use '' if none fits."},
+                        "picture": {"type": "string", "description": "The picture shown BIG above the question: 1-4 emojis making a little scene (e.g. '🖊️', '📕', '👽🐸', '👦👋🚪'). REQUIRED whenever the child must look at something: 'look and choose', 'look and write', every yes/no question (the picture decides the answer) and any sentence about colours/objects that needs a picture to be answerable. Never put the answer as text in the picture."},
                         "answer": {"type": "string", "description": "Correct option text (mc) or the 1-2 words for the gap (fill)."},
                         "accept": {"type": "array", "items": {"type": "string"}, "description": "Other accepted answers (fill)."},
                         "hint_pt": {"type": "string", "description": "Portuguese translation/hint of the English on screen, WITHOUT giving the answer away."},
@@ -235,6 +236,18 @@ KIDS_MIXES = [
 ]
 
 
+def needs_picture(q: dict) -> bool:
+    """True se a pergunta pede para olhar uma figura (ou é sim/não) e veio sem figura: não dá para responder."""
+    if q.get("picture"):
+        return False
+    ins = (q.get("instruction_pt") or "").lower()
+    yes_no = {o.lower() for o in (q.get("options") or [])} == {"yes", "no"}
+    looks = re.search(r"\b(olhe|veja a (figura|imagem)|figura|imagem|desenho)\b", ins)
+    if q.get("type") == "fill" and (q.get("emojis") or [""])[0]:
+        return False   # exercícios antigos: o emoji vira a figura
+    return bool(looks or yes_no)
+
+
 def make_kids_exercise(level_guide: str, topic: str, rnd: int, api_key: str | None, num: int = 0) -> tuple[dict, dict]:
     system = ("You are a warm primary-school English teacher creating original missions for Brazilian children aged 7-8 "
               "who are beginning English (Cambridge Pre A1 Starters). Listening comes before reading: every question "
@@ -253,9 +266,11 @@ def make_kids_exercise(level_guide: str, topic: str, rnd: int, api_key: str | No
               "every wrong option must be clearly wrong. Prefer 'mc' with emojis that show the meaning. 'fill' answers "
               "must be one or two easy words already shown in the examples, with exactly ONE gap ___, and instruction_pt "
               "must say exactly what to write (e.g. 'Escreva a palavra que falta: 1 palavra'). List other correct "
-              "spellings in 'accept'. Check each question yourself.")
+              "spellings in 'accept'. Every question that needs looking (look and choose/write, yes or no, "
+              "'The ___ is red.') MUST have 'picture'. For 'mc' never show the right answer in 'prompt'. "
+              "Check each question yourself.")
     data, usage = _tool_call(system, user, KIDS_EXERCISE_TOOL, api_key, max_tokens=2200)
-    data["questions"] = [q for q in data.get("questions", []) if q.get("answer")][:8]
+    data["questions"] = [q for q in data.get("questions", []) if q.get("answer") and not needs_picture(q)][:8]
     data["kids"] = True
     return data, usage
 

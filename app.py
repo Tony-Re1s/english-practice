@@ -1212,6 +1212,9 @@ def challenge_play(ch: dict) -> None:
     prompt = q.get("prompt") or ""
     say = q.get("say") or prompt or q["answer"]
     ins = q.get("instruction_pt") or "Escolha a resposta certa"
+    if q.get("picture"):
+        st.markdown(f'<div style="text-align:center;font-size:clamp(56px,18vw,96px);line-height:1.15">'
+                    f'{html_escape(q["picture"])}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="kp-card"><div class="kp-ins">{html_escape(ins)}</div>'
                 + (f'<div class="kp-q">{html_escape(prompt)}</div>' if prompt else "") + '</div>', unsafe_allow_html=True)
     tag = f"{ch['id']}:{ch['i']}"
@@ -1463,6 +1466,13 @@ def kids_planet(lvl: str, num: int, done: dict) -> None:
     else:
         ins_html = html_escape(ins_en)
     shown = "" if q["type"] == "order" else prompt
+    # figura da pergunta (grande): campo próprio; nas antigas, o emoji da pergunta de escrever ou o 'answer_emoji'
+    picture = q.get("picture") or ("".join(q.get("emojis") or []) if q["type"] == "fill" else "") or ""
+    if not picture and q.get("answer_emoji") and q["type"] == "mc" and set(map(str.lower, q.get("options") or [])) == {"yes", "no"}:
+        picture = q["answer_emoji"]
+    if picture:
+        st.markdown(f'<div style="text-align:center;font-size:clamp(64px,22vw,110px);line-height:1.15;margin:4px 0 -4px;'
+                    f'filter:drop-shadow(0 8px 14px rgba(0,0,0,.45))">{html_escape(picture)}</div>', unsafe_allow_html=True)
     st.markdown(f'<div class="kp-card"><div style="color:#AFC0E8;font-weight:800">PARADA {i} DE {len(qs)}</div>'
                 f'<div class="kp-ins">{ins_html}</div>'
                 + (f'<div class="kp-q">{html_escape(shown)}</div>' if shown else "") + '</div>', unsafe_allow_html=True)

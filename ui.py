@@ -727,12 +727,14 @@ export default function (component) {
   if (!data || !data.text || window.__epSaid === data.tag) return;
   window.__epSaid = data.tag;
   try {
-    speechSynthesis.cancel();
+    const ss = speechSynthesis;
     const u = new SpeechSynthesisUtterance(data.text); u.lang = 'en-US'; u.rate = data.rate || .85; u.pitch = data.pitch || 1.25;
-    const vs = speechSynthesis.getVoices();
+    const vs = ss.getVoices();
     const v = vs.find(v => /en-US/.test(v.lang) && /(Samantha|Ava|Aria|Jenny|Google US|Allison|Nicky)/.test(v.name)) || vs.find(v => /^en/.test(v.lang));
     if (v) u.voice = v;
-    speechSynthesis.speak(u);
+    ss.resume();
+    // Android: cancel() seguido de speak() na mesma hora faz a fala sumir; espera um instante
+    if (ss.speaking || ss.pending) { ss.cancel(); setTimeout(() => ss.speak(u), 120); } else ss.speak(u);
   } catch (e) {}
 }
 """
@@ -742,6 +744,56 @@ _say_now = st.components.v2.component("english_say_now", js=_SAY_JS)
 def say_now(text: str, tag: str, key: str = "say_now") -> None:
     """Fala o texto em inglês na hora, com a voz do aparelho (uma vez por tag)."""
     _say_now(key=key, data={"text": text, "tag": tag})
+
+
+# --- Botão que fala no próprio toque (sem ida ao servidor) -----------------------------------
+# No Android, som disparado depois de um rerun costuma ser bloqueado ou some (bug do cancel+speak).
+# Aqui o som sai dentro do toque: primeiro o áudio gerado no servidor (funciona em qualquer celular),
+# e, se não houver ou falhar, a voz do aparelho.
+_SPK_CSS = """
+.spk { width:100%; min-height:48px; border-radius:16px; border:2px solid rgba(255,255,255,.25); cursor:pointer;
+  background:var(--spk-bg, #5B4BFF); color:#fff; font:800 17px 'Nunito',system-ui,sans-serif; padding:10px 14px;
+  box-shadow:0 4px 0 rgba(0,0,0,.35); -webkit-tap-highlight-color:transparent; transition:transform .08s, filter .2s; }
+.spk:active { transform:translateY(3px); box-shadow:0 1px 0 rgba(0,0,0,.35); }
+.spk.on { filter:brightness(1.25); }
+"""
+_SPK_JS = """
+export default function (component) {
+  const { data, parentElement } = component;
+  let b = parentElement.querySelector('button.spk');
+  if (!b) { b = document.createElement('button'); b.className = 'spk'; parentElement.appendChild(b); }
+  b.textContent = data.label || '🔊';
+  if (data.bg) b.style.setProperty('--spk-bg', data.bg);
+  b.onclick = () => {
+    const done = () => b.classList.remove('on');
+    b.classList.add('on'); setTimeout(done, 1800);
+    const device = () => { try {
+      const ss = window.speechSynthesis; if (!ss) return;
+      const u = new SpeechSynthesisUtterance(data.text); u.lang = 'en-US'; u.rate = data.rate || .8;
+      const vs = ss.getVoices();
+      const v = vs.find(v => /en-US/.test(v.lang) && /(Samantha|Ava|Aria|Jenny|Google US|Allison|Nicky)/.test(v.name)) || vs.find(v => /^en/.test(v.lang));
+      if (v) u.voice = v;
+      ss.resume();
+      if (ss.speaking || ss.pending) { ss.cancel(); setTimeout(() => ss.speak(u), 120); } else ss.speak(u);
+    } catch (e) {} };
+    if (data.src) {
+      try {
+        if (window.__epSpk) { window.__epSpk.pause(); }
+        const a = new Audio(data.src); window.__epSpk = a; a.playbackRate = 1;
+        const p = a.play(); if (p && p.catch) p.catch(device);
+      } catch (e) { device(); }
+    } else device();
+  };
+}
+"""
+_spk = st.components.v2.component("english_speak_btn", css=_SPK_CSS, js=_SPK_JS)
+
+
+def speak_button(label: str, text: str, key: str, src: str | None = None, bg: str | None = None,
+                 rate: float = .8) -> None:
+    """Botão que fala `text` em inglês no próprio toque. `src`: data URL do áudio do servidor (opcional)."""
+    if text:
+        _spk(key=key, data={"label": label, "text": text, "src": src, "bg": bg, "rate": rate})
 
 
 # --- Palavras para tocar e ouvir (e, depois do teste de pronúncia, coloridas) --------------

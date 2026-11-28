@@ -651,7 +651,7 @@ def users_view() -> None:
     if rows:
         view = [{
             "e-mail": r["email"], "ativo": r["active"], "nível": LEVELS.get(r["level"] or "", {}).get("label", "livre"),
-            "travado": r["level_locked"], "falas/dia": r["daily_turns"] if r["daily_turns"] is not None else "padrão",
+            "travado": r["level_locked"], "falas/dia": str(r["daily_turns"]) if r["daily_turns"] is not None else "padrão",
             "ao vivo": f"{r['live_daily_minutes'] or 10} min" if r["live_enabled"] else "não",
             "chaves": ", ".join(f"{PROVIDER_LABEL[p].split(' ')[0]}: {users.POLICIES.get((r['key_policy'] or {}).get(p, 'owner'))}"
                                 for p in PROVIDERS),
@@ -1220,8 +1220,7 @@ def challenge_play(ch: dict) -> None:
     tag = f"{ch['id']}:{ch['i']}"
     if q.get("say"):   # voz do aparelho: instantânea, não gasta o tempo do desafio
         ui.say_now(say, tag, key="say_now_ch")
-        if st.button("🔊 Ouvir de novo", key=f"ch_re_{tag}"):
-            ui.say_now(say, tag + f":{_t.time()}", key="say_now_ch2")
+        ui.speak_button("🔊 Ouvir de novo", say, key=f"ch_re_{tag}")   # voz do aparelho: não gasta o tempo
     emo = q.get("emojis") or []
     cols = st.columns(2)
     for j, opt in enumerate(q["options"]):
@@ -1333,6 +1332,21 @@ def kids_galaxy(lvl: str, done: dict) -> None:
                     st.rerun()
         if ss.get("shop_msg"):
             st.success(ss.pop("shop_msg"))
+
+
+def _tts_src(text: str, pace: str = "slow") -> str | None:
+    """Áudio do servidor como data URL, para os botões que falam no próprio toque (guardado na sessão)."""
+    text = (text or "").replace("___", "…").strip()
+    if not text:
+        return None
+    try:
+        cache = ss.setdefault("tts_cache", {})
+        if text not in cache:
+            cache[text] = voice.speak(text, pace=pace, log=log)[:2]
+        audio, mime = cache[text]
+        return f"data:{mime};base64," + base64.b64encode(audio).decode()
+    except Exception:
+        return None   # sem áudio do servidor, o botão usa a voz do aparelho
 
 
 def _say(text: str) -> None:
@@ -2010,10 +2024,12 @@ def translator_tab() -> None:
                         f'</div></div>', unsafe_allow_html=True)
             ui.say_now(k.get("english", ""), k.get("_tag", ""), key="say_now_tr")
             c1, c2 = st.columns(2)
-            if c1.button("🔊 Ouvir a palavra", width="stretch", key="tr_k1"):
-                ui.say_now(k.get("english", ""), f"w{_now_tag()}", key="say_now_tr2")
-            if c2.button("🔊 Ouvir a frase", width="stretch", key="tr_k2"):
-                ui.say_now(k.get("example_en", ""), f"e{_now_tag()}", key="say_now_tr3")
+            with c1:
+                ui.speak_button("🔊 Ouvir a palavra", k.get("english", ""), key="tr_k1",
+                                src=_tts_src(k.get("english", "")), rate=.7)
+            with c2:
+                ui.speak_button("🔊 Ouvir a frase", k.get("example_en", ""), key="tr_k2",
+                                src=_tts_src(k.get("example_en", "")))
             if k.get("english"):
                 pron_practice(k["english"], key="kid_" + str(zlib.crc32(k["english"].encode())), kids=True)
         return
